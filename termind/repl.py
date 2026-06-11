@@ -1,4 +1,4 @@
-"""The termind REPL — a neon terminal agent, sandboxed and budgeted on AION.
+"""The termind REPL — a neon cyberpunk terminal agent, sandboxed and budgeted on AION.
 
 Every /ask runs as an AION process granted only mem.search/mem.get with a credit budget;
 chat goes straight to the local model. /status shows the audited spend.
@@ -6,6 +6,8 @@ chat goes straight to the local model. /status shows the audited spend.
 from __future__ import annotations
 
 import json
+import sys
+import time
 
 from aion import Capabilities, Kernel
 
@@ -13,7 +15,16 @@ from . import __version__
 from .indexer import index_folder
 from .llm import MODEL, chat, offline_chat, ollama_available, parse_action
 
-C, M, G, Y, D, N = "\033[36m", "\033[35m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
+# ── neon palette (256-color ANSI) ────────────────────────────────────────────
+CY = "\033[38;5;51m"     # electric cyan
+PK = "\033[38;5;198m"    # hot magenta
+PU = "\033[38;5;141m"    # neon purple
+GR = "\033[38;5;84m"     # matrix green
+YL = "\033[38;5;226m"    # warning yellow
+WH = "\033[97m"          # bright white
+D  = "\033[2m"           # dim
+B  = "\033[1m"           # bold
+N  = "\033[0m"           # reset
 
 ASK_SYSTEM = (
     "You answer using ONLY the user's indexed documents. Reply with EXACTLY ONE JSON object:\n"
@@ -21,20 +32,44 @@ ASK_SYSTEM = (
     "Search first; never invent content."
 )
 
-BANNER = rf"""{M}
-  ▀█▀ █▀▀ █▀█ █▀▄▀█ █ █▄░█ █▀▄
-  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀{N}  {D}v{__version__} · local agent · on AION{N}
+BANNER = rf"""
+{PK}{B}  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄{N}
+{CY}{B}   ▀█▀ █▀▀ █▀█ █▀▄▀█ █ █▄░█ █▀▄{N}
+{PU}{B}   ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀{N}   {D}v{__version__} ⟨ AGENT TERMINAL ⟩{N}
+{PK}{B}  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄{N}
 """
 
-FEATURES = f"""{C}┌─ FEATURES ─────────────────────────────────────────────────┐{N}
-{C}│{N}  just type        chat with your local model ({MODEL})
-{C}│{N}  /index <folder>  index your notes/docs/code (stays local)
-{C}│{N}  /ask <question>  answer from YOUR docs, with source cites
-{C}│{N}  /status          model · credits spent · sandbox audit
-{C}│{N}  /help            show this again        /exit  quit
-{C}└────────────────────────────────────────────────────────────┘{N}
-  {D}private · $0/query · sandboxed & budgeted by the AION kernel{N}
+FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩═══════════════════════════════════════╗{N}
+{CY}║{N}  {GR}◉{N} {WH}just type{N}        {D}»{N} neural chat with local core {PU}⟨{MODEL}⟩{N}
+{CY}║{N}  {GR}◉{N} {WH}/index <folder>{N}  {D}»{N} absorb your files into agent memory
+{CY}║{N}  {GR}◉{N} {WH}/ask <question>{N}  {D}»{N} query YOUR data · answers cite sources
+{CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
+{CY}║{N}  {GR}◉{N} {WH}/help{N}  {D}» this panel{N}      {GR}◉{N} {WH}/exit{N}  {D}» jack out{N}
+{CY}╚════════════════════════════════════════════════════════════════╝{N}
+   {PK}▸{N} {D}PRIVATE{N} {PK}▸{N} {D}$0/QUERY{N} {PK}▸{N} {D}SANDBOXED + BUDGETED BY THE AION KERNEL{N}
 """
+
+BOOT = [
+    ("AION kernel", "online"),
+    ("capability sandbox", "armed"),
+    ("credit governor", "enforcing"),
+    ("semantic memory", "mounted"),
+]
+
+
+def _boot(live: bool) -> None:
+    print(f"{D}  initializing…{N}")
+    for name, state in BOOT:
+        time.sleep(0.12)
+        print(f"  {GR}▸{N} {name:<20} {CY}[{state.upper()}]{N}")
+    time.sleep(0.12)
+    core = f"{GR}[ONLINE · LOCAL]{N}" if live else f"{YL}[OFFLINE BRAIN — ./setup.sh to install]{N}"
+    print(f"  {GR}▸{N} {'neural core':<20} {core}\n")
+
+
+def _panel(title: str, body: str, color: str = PU) -> str:
+    return (f"{color}┌─⟨ {WH}{B}{title}{N}{color} ⟩{'─' * max(2, 58 - len(title))}{N}\n"
+            f"{color}│{N} {body}\n{color}└{'─' * 64}{N}")
 
 
 def _ask_agent(sb, question: str, think) -> str:
@@ -123,25 +158,43 @@ class Session:
             return f"unknown command {line.split()[0]} — try /help"
         return self.do_chat(line)
 
+    # styled wrapper around handle() for the live REPL (tests use handle() directly)
+    def render(self, line: str) -> str:
+        out = self.handle(line)
+        if not out:
+            return ""
+        s = line.strip()
+        if s == "/help":
+            return out
+        if s == "/status":
+            return _panel("SYSTEM STATUS", out.replace(" · ", f"\n{PU}│{N} {CY}▪{N} "), PU)
+        if s.startswith("/index"):
+            return _panel("MEMORY ABSORBED", f"{GR}{out}{N}", GR.replace("38;5;84", "38;5;84"))
+        if s.startswith("/ask"):
+            return _panel("AGENT RESPONSE", out, CY)
+        if s.startswith("/"):
+            return f"{YL}{out}{N}"
+        return _panel("NEURAL CORE", out, PK)
+
 
 def run() -> int:
     s = Session()
     print(BANNER)
+    _boot(s.live)
     print(FEATURES)
-    if not s.live:
-        print(f"  {Y}⚠ Ollama not detected — chatting uses the offline brain. ./setup.sh fixes this.{N}\n")
     while True:
         try:
-            line = input(f"{M}termind{N} {C}❯{N} ")
+            line = input(f"{PK}{B}⟦{N}{CY}termind{N}{PK}{B}⟧{N} {GR}❯{N} ")
         except (EOFError, KeyboardInterrupt):
-            print()
+            print(f"\n{D}link severed.{N}")
             return 0
         try:
-            out = s.handle(line)
+            out = s.render(line)
         except SystemExit:
-            print(f"{D}bye.{N}")
+            print(f"{PU}◢ jacking out… session closed.{N}")
             return 0
         except Exception as e:  # the REPL never crashes
-            out = f"{Y}error: {e}{N}"
+            out = f"{YL}⚠ error: {e}{N}"
         if out:
             print(f"\n{out}\n")
+        sys.stdout.flush()
