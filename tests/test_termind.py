@@ -97,3 +97,26 @@ def test_server_and_model_present_is_live(monkeypatch):
     monkeypatch.setattr(r, "ollama_available", lambda: True)
     monkeypatch.setattr(r, "model_available", lambda: True)
     assert r.Session().live is True
+
+
+def test_memory_survives_restart():
+    s1 = _session()
+    s1.handle("/remember my name is Bhupendra and I build agent infrastructure")
+    s2 = _session()                                    # simulates closing + reopening
+    assert len(s2.store["facts"]) == 1
+    assert "Bhupendra" in s2.handle("/recall who am I")
+
+
+def test_indexed_docs_survive_restart(docs):
+    s1 = _session()
+    s1.do_index(docs)
+    s2 = _session()
+    assert s2.chunks > 0
+    assert "investor" in s2.handle("/ask what are the action items?").lower()
+
+
+def test_facts_injected_into_chat_system_prompt():
+    s = _session()
+    s.handle("/remember my name is Bhupendra")
+    msgs = s.chat_messages("hello")
+    assert "Bhupendra" in msgs[0]["content"] and msgs[0]["role"] == "system"

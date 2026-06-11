@@ -14,6 +14,7 @@ from aion import Capabilities, Kernel
 from . import __version__
 from .indexer import index_folder
 from .llm import MODEL, chat, model_available, offline_chat, ollama_available, parse_action
+from .store import load as store_load, save as store_save
 
 # ── neon palette (256-color ANSI) ────────────────────────────────────────────
 CY = "\033[38;5;51m"     # electric cyan
@@ -43,6 +44,8 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}just type{N}        {D}»{N} neural chat with local core {PU}⟨{MODEL}⟩{N}
 {CY}║{N}  {GR}◉{N} {WH}/index <folder>{N}  {D}»{N} absorb your files into agent memory
 {CY}║{N}  {GR}◉{N} {WH}/ask <question>{N}  {D}»{N} query YOUR data · answers cite sources
+{CY}║{N}  {GR}◉{N} {WH}/remember <fact>{N} {D}»{N} teach it about you · survives restarts
+{CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} search everything it remembers
 {CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
 {CY}║{N}  {GR}◉{N} {WH}/help{N}  {D}» this panel{N}      {GR}◉{N} {WH}/exit{N}  {D}» jack out{N}
 {CY}╚════════════════════════════════════════════════════════════════╝{N}
@@ -115,14 +118,37 @@ class Session:
         self.chunks = 0
         self.spent = 0.0
         self.denied = 0
+        # persistent memory: reload facts + indexed docs from the last session
+        self.store = store_load()
+        for i, fact in enumerate(self.store["facts"]):
+            self.k.syscall("mem.put", key=f"fact#{i}", value=fact, tags=["fact"])
+        for key, e in self.store["docs"].items():
+            self.k.syscall("mem.put", key=key, value=e["value"], tags=e.get("tags", []))
+        self.chunks = len(self.store["docs"])
 
     def do_index(self, folder: str) -> str:
         entries = index_folder(folder)
         for e in entries:
             self.k.syscall("mem.put", key=e["key"], value=e["text"], tags=[e["source"]])
+            self.store["docs"][e["key"]] = {"value": e["text"], "tags": [e["source"]]}
+        store_save(self.store)  # indexed docs survive restarts
         self.chunks += len(entries)
         srcs = len({e["source"] for e in entries})
-        return f"indexed {srcs} files → {len(entries)} chunks (all local)"
+        return f"indexed {srcs} files → {len(entries)} chunks (all local · remembered)"
+
+    def do_remember(self, fact: str) -> str:
+        self.store["facts"].append(fact)
+        store_save(self.store)
+        self.k.syscall("mem.put", key=f"fact#{len(self.store['facts'])-1}",
+                       value=fact, tags=["fact"])
+        return f"remembered ({len(self.store['facts'])} facts on file): {fact}"
+
+    def do_recall(self, query: str) -> str:
+        hits = self.k.syscall("mem.search", query=query, top_k=3)["result"]
+        if not hits:
+            return "no memories match."
+        return "\n".join(f"{h['score']:.2f}  [{h['key']}]  "
+                         + " ".join(str(h['value']).split())[:160] for h in hits)
 
     def do_ask(self, q: str) -> str:
         think = (lambda m: chat(m, fmt_json=True)) if self.live else offline_ask_think
@@ -134,10 +160,20 @@ class Session:
         self.denied = self.k.meter.denied
         return p.result if p.state.value == "done" else f"(error: {p.error})"
 
+    def chat_messages(self, text: str) -> list:
+        """System prompt carries the remembered facts — the model knows who it's talking to."""
+        sys = ("You are termind, the user's private local agent running in their terminal. "
+               "Be concise and direct.")
+        if self.store["facts"]:
+            sys += " Known facts about your user: " + "; ".join(self.store["facts"])
+        return [{"role": "system", "content": sys}] + self.history + [
+            {"role": "user", "content": text}]
+
     def do_chat(self, text: str) -> str:
-        self.history.append({"role": "user", "content": text})
-        reply = chat(self.history) if self.live else offline_chat(self.history)
-        self.history.append({"role": "assistant", "content": reply})
+        msgs = self.chat_messages(text)
+        reply = chat(msgs) if self.live else offline_chat(msgs)
+        self.history += [{"role": "user", "content": text},
+                         {"role": "assistant", "content": reply}]
         return reply
 
     def do_status(self) -> str:
@@ -147,9 +183,9 @@ class Session:
             brain = f"server up, model missing (run: ollama pull {MODEL})"
         else:
             brain = "offline brain (run ./setup.sh)"
-        return (f"brain: {brain} · indexed chunks: {self.chunks} · "
-                f"credits spent: {self.spent:.2f} · denied by sandbox: {self.denied} · "
-                f"data off-machine: 0 bytes")
+        return (f"brain: {brain} · facts remembered: {len(self.store['facts'])} · "
+                f"indexed chunks: {self.chunks} · credits spent: {self.spent:.2f} · "
+                f"denied by sandbox: {self.denied} · data off-machine: 0 bytes")
 
     def handle(self, line: str) -> str:
         line = line.strip()
@@ -167,6 +203,12 @@ class Session:
         if line.startswith("/ask"):
             q = line[4:].strip()
             return self.do_ask(q) if q else "usage: /ask <question>"
+        if line.startswith("/remember"):
+            f = line[9:].strip()
+            return self.do_remember(f) if f else "usage: /remember <fact about you>"
+        if line.startswith("/recall"):
+            q = line[7:].strip()
+            return self.do_recall(q) if q else "usage: /recall <query>"
         if line.startswith("/"):
             return f"unknown command {line.split()[0]} — try /help"
         return self.do_chat(line)
@@ -185,6 +227,10 @@ class Session:
             return _panel("MEMORY ABSORBED", f"{GR}{out}{N}", GR.replace("38;5;84", "38;5;84"))
         if s.startswith("/ask"):
             return _panel("AGENT RESPONSE", out, CY)
+        if s.startswith("/remember"):
+            return _panel("MEMORY WRITTEN", f"{GR}{out}{N}", PU)
+        if s.startswith("/recall"):
+            return _panel("MEMORY RECALL", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith("/"):
             return f"{YL}{out}{N}"
         return _panel("NEURAL CORE", out, PK)
@@ -194,6 +240,9 @@ def run() -> int:
     s = Session()
     print(BANNER)
     _boot(s.live, getattr(s, "server", False))
+    if s.store["facts"] or s.store["docs"]:
+        print(f"  {PU}◆{N} {D}memory restored:{N} {WH}{len(s.store['facts'])}{N}{D} facts · "
+              f"{N}{WH}{len(s.store['docs'])}{N}{D} doc chunks from previous sessions{N}\n")
     print(FEATURES)
     while True:
         try:
