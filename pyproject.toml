@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[project]
+name = "termind"
+version = "0.1.0"
+description = "A local AI agent that lives in your terminal — clone, run one command, and it installs everything (Ollama, model, sandbox) and boots a neon agent REPL. $0, private, on AION."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Bhupendra Tale", email = "bgurjar05.bg@gmail.com" }]
+keywords = ["ai", "agent", "terminal", "local", "ollama", "gemma", "repl", "aion"]
+dependencies = ["aion-os @ git+https://github.com/bhupendra05/aion.git"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+termind = "termind.cli:main"
+
+[project.urls]
+Source = "https://github.com/bhupendra05/termind"
+"Built on" = "https://github.com/bhupendra05/aion"
