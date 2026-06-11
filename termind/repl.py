@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -226,6 +227,20 @@ class Session:
 
     # ── builder powers: folders, code files, whole projects, VS Code ─────────
     @staticmethod
+    def _dry_run(cmd: str) -> str:
+        """Verify a command can actually run BEFORE executing: the binary must exist.
+        Auto-repairs macOS's missing 'python' by swapping to python3. '' ⇒ don't run."""
+        tok = cmd.split()
+        if not tok:
+            return ""
+        if shutil.which(tok[0]) is None:
+            if tok[0] == "python" and shutil.which("python3"):
+                tok[0] = "python3"            # macOS ships python3 only
+            else:
+                return ""                      # binary missing → skip instead of erroring
+        return " ".join(tok)
+
+    @staticmethod
     def _py_error(path: str, code: str):
         """Syntax-check Python without executing it; None if clean."""
         if not path.endswith(".py"):
@@ -310,7 +325,8 @@ class Session:
              '{"folder": "<kebab-name>", "files": {"<relative path>": "<full file content>"}, '
              '"run": "<shell command to run it from inside the folder>"}. '
              "files MUST include README.md and ARCHITECTURE.md (explain the design: components, "
-             "data flow, why). Keep code short and working."},
+             "data flow, why). Keep code short and working. In the run command always use "
+             "python3, never bare python."},
             {"role": "user", "content": idea}], fmt_json=True))
         folder, files = plan.get("folder"), plan.get("files") or {}
         if not folder or not files:
@@ -335,7 +351,8 @@ class Session:
                + (f" · self-healed {healed}" if healed else "")]
         if open_editor:
             out.append(self.do_code(root))
-        run_cmd = str(plan.get("run") or "").strip()
+        wanted = str(plan.get("run") or "").strip().replace(f"{folder.rstrip('/')}/", "")
+        run_cmd = self._dry_run(wanted)          # verify the binary exists before running
         if run_cmd:
             try:
                 r = subprocess.run(run_cmd, shell=True, cwd=root, capture_output=True,
@@ -343,6 +360,8 @@ class Session:
                 out.append(f"▶ ran: {run_cmd}\n" + (r.stdout or r.stderr or "(no output)").strip()[:600])
             except Exception as e:
                 out.append(f"▶ run skipped ({e})")
+        elif wanted:
+            out.append(f"▶ run skipped — '{wanted.split()[0]}' not found on this machine")
         return "\n".join(out)
 
     # ── natural language → action (no slash needed) ──────────────────────────
@@ -350,7 +369,7 @@ class Session:
         """Route a plain-English request to the right power."""
         low = text.lower()
         # fast offline paths first
-        m = re.search(r"(?:folder|directory)(?:\s+(?:called|named))?\s+([\w./~-]+)", text, re.I)
+        m = re.search(r"(?:folder|directory)(?:\s+(?:called|named|name))?\s+([\w./~-]+)", text, re.I)
         wants_project = re.search(r"\b(project|tool|app)\b", low)
         if re.search(r"vs ?code|editor", low) and re.search(r"\bopen\b", low) and not wants_project:
             mp = re.search(r"(?:open|in)\s+([~./][\w./-]*)", text)
@@ -393,8 +412,11 @@ class Session:
         ans = (confirm or input)(f"  {PK}execute? [y/N]{N} ")
         if str(ans).strip().lower() != "y":
             return "aborted — nothing was run."
+        checked = self._dry_run(cmd)
+        if not checked:
+            return f"can't run — '{cmd.split()[0]}' not found on this machine."
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(checked, shell=True, capture_output=True, text=True, timeout=60)
             self.actions += 1
             out = (r.stdout or r.stderr or "(no output)").strip()[:1500]
             return f"$ {cmd}\n{out}"

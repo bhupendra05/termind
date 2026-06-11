@@ -252,3 +252,23 @@ def test_py_error_detects_and_passes():
     assert Session._py_error("x.py", "def broken(:") is not None
     assert Session._py_error("x.py", "a = 1") is None
     assert Session._py_error("notes.md", "anything (((") is None  # only checks .py
+
+
+def test_folder_name_phrasing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    s = _session()
+    out = s.handle("can you create me a folder name termind1folder")
+    assert "created folder" in out and (tmp_path / "termind1folder").is_dir()
+
+
+def test_dry_run_swaps_python_for_python3(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r.shutil, "which",
+                        lambda b: "/usr/bin/python3" if b == "python3" else None)
+    assert r.Session._dry_run("python timer.py") == "python3 timer.py"
+    assert r.Session._dry_run("ghostbin --x") == ""        # missing binary → skip, no crash
+
+
+def test_dry_run_passes_existing_binaries():
+    from termind.repl import Session
+    assert Session._dry_run("echo hi").startswith("echo")
