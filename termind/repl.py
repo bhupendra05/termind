@@ -13,7 +13,7 @@ from aion import Capabilities, Kernel
 
 from . import __version__
 from .indexer import index_folder
-from .llm import MODEL, chat, offline_chat, ollama_available, parse_action
+from .llm import MODEL, chat, model_available, offline_chat, ollama_available, parse_action
 
 # ── neon palette (256-color ANSI) ────────────────────────────────────────────
 CY = "\033[38;5;51m"     # electric cyan
@@ -57,13 +57,18 @@ BOOT = [
 ]
 
 
-def _boot(live: bool) -> None:
+def _boot(live: bool, server: bool) -> None:
     print(f"{D}  initializing…{N}")
     for name, state in BOOT:
         time.sleep(0.12)
         print(f"  {GR}▸{N} {name:<20} {CY}[{state.upper()}]{N}")
     time.sleep(0.12)
-    core = f"{GR}[ONLINE · LOCAL]{N}" if live else f"{YL}[OFFLINE BRAIN — ./setup.sh to install]{N}"
+    if live:
+        core = f"{GR}[ONLINE · LOCAL]{N}"
+    elif server:
+        core = f"{YL}[SERVER UP · NO MODEL — run: ollama pull {MODEL}]{N}"
+    else:
+        core = f"{YL}[OFFLINE BRAIN — ./setup.sh to install]{N}"
     print(f"  {GR}▸{N} {'neural core':<20} {core}\n")
 
 
@@ -102,7 +107,10 @@ def offline_ask_think(msgs):
 class Session:
     def __init__(self, kernel: Kernel = None, live: bool = None):
         self.k = kernel or Kernel()
-        self.live = ollama_available() if live is None else live
+        self.server = ollama_available() if live is None else live
+        # "live" requires the server AND the model — a running server with no model pulled
+        # must not pretend to be online (it would 404 on the first chat).
+        self.live = (self.server and model_available()) if live is None else live
         self.history = []
         self.chunks = 0
         self.spent = 0.0
@@ -133,7 +141,12 @@ class Session:
         return reply
 
     def do_status(self) -> str:
-        brain = f"{MODEL} (live, local)" if self.live else "offline brain (run ./setup.sh)"
+        if self.live:
+            brain = f"{MODEL} (live, local)"
+        elif getattr(self, "server", False):
+            brain = f"server up, model missing (run: ollama pull {MODEL})"
+        else:
+            brain = "offline brain (run ./setup.sh)"
         return (f"brain: {brain} · indexed chunks: {self.chunks} · "
                 f"credits spent: {self.spent:.2f} · denied by sandbox: {self.denied} · "
                 f"data off-machine: 0 bytes")
@@ -180,7 +193,7 @@ class Session:
 def run() -> int:
     s = Session()
     print(BANNER)
-    _boot(s.live)
+    _boot(s.live, getattr(s, "server", False))
     print(FEATURES)
     while True:
         try:

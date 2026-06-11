@@ -81,3 +81,19 @@ def test_index_folder_skips_binaries(tmp_path):
     (tmp_path / "a.md").write_text("hello world")
     (tmp_path / "b.png").write_bytes(b"\x89PNG")
     assert {e["source"] for e in index_folder(str(tmp_path))} == {"a.md"}
+
+
+def test_server_up_but_no_model_is_not_live(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "ollama_available", lambda: True)
+    monkeypatch.setattr(r, "model_available", lambda: False)
+    s = r.Session()
+    assert s.server is True and s.live is False        # must NOT pretend to be online
+    assert "model missing" in s.do_status()
+
+
+def test_server_and_model_present_is_live(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "ollama_available", lambda: True)
+    monkeypatch.setattr(r, "model_available", lambda: True)
+    assert r.Session().live is True

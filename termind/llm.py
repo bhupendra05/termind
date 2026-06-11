@@ -17,14 +17,31 @@ def ollama_available() -> bool:
         return False
 
 
+def model_available() -> bool:
+    """True only if the configured MODEL is actually pulled on the server."""
+    try:
+        with urllib.request.urlopen(HOST + "/api/tags", timeout=2) as r:  # noqa: S310
+            models = json.loads(r.read()).get("models", [])
+        base = MODEL.split(":")[0]
+        return any(str(m.get("name", "")).split(":")[0] == base for m in models)
+    except Exception:
+        return False
+
+
 def chat(messages: list, fmt_json: bool = False) -> str:
     payload = {"model": MODEL, "messages": messages, "stream": False}
     if fmt_json:
         payload["format"] = "json"
     req = urllib.request.Request(HOST + "/api/chat", data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as r:  # noqa: S310
-        return json.loads(r.read())["message"]["content"]
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:  # noqa: S310
+            return json.loads(r.read())["message"]["content"]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:  # server is up but the model was never pulled
+            raise RuntimeError(f"model '{MODEL}' is not on the Ollama server yet — "
+                               f"run:  ollama pull {MODEL}") from e
+        raise RuntimeError(f"Ollama error (HTTP {e.code}) — is the model loaded?") from e
 
 
 def offline_chat(messages: list) -> str:
