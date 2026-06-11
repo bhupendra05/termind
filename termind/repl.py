@@ -26,6 +26,20 @@ from .store import load as store_load, save as store_save
 AUTO_FACT = re.compile(
     r"(?:^|[.!?]\s+)(i am|i'm|my name is|i work|i live|i like|i prefer|i build|call me)\b", re.I)
 
+# Natural-language actions: "create a folder", "open vs code", "build me a tool…" — no slash
+# needed. The hint gate keeps ordinary chat away from the intent classifier.
+ACTION_HINT = re.compile(
+    r"\b(create|make|build|scaffold|new|open|write|generate)\b[\s\S]*"
+    r"\b(folder|directory|project|tool|app|file|script|code|vs ?code|editor)\b", re.I)
+INTENT_SYS = (
+    'Classify the user\'s request. Reply with EXACTLY one JSON object:\n'
+    '{"intent": "mkdir|open_editor|write_file|build_project|chat",'
+    ' "path": "<folder/file path if any>", "file": "<target file for write_file>",'
+    ' "spec": "<what the code should do>"}\n'
+    "mkdir = just create a folder. open_editor = open something in VS Code. "
+    "write_file = write ONE code file. build_project = create a tool/app/project "
+    "(multiple files). chat = anything else.")
+
 # ── neon palette (256-color ANSI) ────────────────────────────────────────────
 CY = "\033[38;5;51m"     # electric cyan
 PK = "\033[38;5;198m"    # hot magenta
@@ -59,6 +73,7 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/build <idea>{N}    {D}»{N} scaffold a project · write code · open VS Code
 {CY}║{N}  {GR}◉{N} {WH}/write <file> <spec>{N} {D}» generate one file (preview + y/N){N}
 {CY}║{N}  {GR}◉{N} {WH}/mkdir <path>{N}  {D}» create folder{N}   {GR}◉{N} {WH}/code <path>{N}  {D}» open VS Code{N}
+{CY}║{N}  {PK}◆{N} {WH}or just say it{N}  {D}» "create a folder x" · "build a tool that…"{N}
 {CY}║{N}  {GR}◉{N} {WH}/remember <fact>{N} {D}»{N} teach it about you · survives restarts
 {CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} embedding search over all memories
 {CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
@@ -211,6 +226,36 @@ class Session:
 
     # ── builder powers: folders, code files, whole projects, VS Code ─────────
     @staticmethod
+    def _py_error(path: str, code: str):
+        """Syntax-check Python without executing it; None if clean."""
+        if not path.endswith(".py"):
+            return None
+        try:
+            compile(code, path, "exec")
+            return None
+        except SyntaxError as e:
+            return f"line {e.lineno}: {e.msg}"
+
+    def _gen_code(self, file: str, spec: str) -> str:
+        """Generate file content and SELF-HEAL: if Python doesn't compile, the model
+        gets the error back and fixes its own code (up to 2 repair rounds)."""
+        sys_p = ("You write complete, working file contents. Reply ONLY with the raw file "
+                 "content — no markdown fences, no commentary.")
+        content = self._strip_fences(chat([
+            {"role": "system", "content": sys_p},
+            {"role": "user", "content": f"Write the file {file}. It should: {spec}"}]))
+        for _ in range(2):
+            err = self._py_error(file, content)
+            if not err:
+                break
+            content = self._strip_fences(chat([
+                {"role": "system", "content": sys_p},
+                {"role": "user", "content":
+                 f"This {file} has a syntax error ({err}). Reply with the FULL corrected "
+                 f"file content only:\n\n{content}"}]))
+        return content
+
+    @staticmethod
     def _strip_fences(t: str) -> str:
         t = t.strip()
         if t.startswith("```"):
@@ -239,11 +284,10 @@ class Session:
     def do_write(self, file: str, spec: str, confirm=None) -> str:
         if not self.live:
             return "code generation needs a live model — install Ollama (./setup.sh)"
-        content = self._strip_fences(chat([
-            {"role": "system", "content":
-             "You write complete, working file contents. Reply ONLY with the raw file "
-             "content — no markdown fences, no commentary."},
-            {"role": "user", "content": f"Write the file {file}. It should: {spec}"}]))
+        content = self._gen_code(file, spec)
+        warn = self._py_error(file, content)
+        if warn:
+            print(f"  {YL}⚠ couldn't fully self-heal ({warn}) — review before running{N}")
         preview = "\n".join(content.splitlines()[:15])
         print(f"\n  {YL}⚡ will write {WH}{file}{N} {D}({len(content.splitlines())} lines){N}\n"
               f"{D}{preview}{N}\n")
@@ -257,13 +301,16 @@ class Session:
         return f"wrote {full} ({len(content.splitlines())} lines) — open it:  /code {file}"
 
     def do_build(self, idea: str, confirm=None, open_editor: bool = True) -> str:
+        """The full pipeline: plan → folder → code → ARCHITECTURE.md → VS Code → run."""
         if not self.live:
             return "project building needs a live model — install Ollama (./setup.sh)"
         plan = parse_action(chat([
             {"role": "system", "content":
-             'Scaffold a SMALL starter project (2-4 short files). Reply with EXACTLY '
-             '{"folder": "<kebab-name>", "files": {"<relative path>": "<full file content>"}}. '
-             "Include a README.md. Keep files short and working."},
+             'Scaffold a SMALL working starter project (2-5 short files). Reply with EXACTLY '
+             '{"folder": "<kebab-name>", "files": {"<relative path>": "<full file content>"}, '
+             '"run": "<shell command to run it from inside the folder>"}. '
+             "files MUST include README.md and ARCHITECTURE.md (explain the design: components, "
+             "data flow, why). Keep code short and working."},
             {"role": "user", "content": idea}], fmt_json=True))
         folder, files = plan.get("folder"), plan.get("files") or {}
         if not folder or not files:
@@ -273,14 +320,62 @@ class Session:
         if str((confirm or input)(f"  {PK}build it? [y/N]{N} ")).strip().lower() != "y":
             return "aborted — nothing was created."
         root = os.path.expanduser(folder)
+        healed = 0
         for rel, content in files.items():
+            code = self._strip_fences(str(content))
+            if self._py_error(rel, code):  # self-heal broken python before it hits disk
+                code = self._gen_code(rel, f"(repair) original intent: {idea}\n\n{code}")
+                healed += 1
             full = os.path.join(root, rel)
             os.makedirs(os.path.dirname(full) or root, exist_ok=True)
             with open(full, "w", encoding="utf-8") as f:
-                f.write(self._strip_fences(str(content)))
+                f.write(code)
         self.actions += 1
-        opened = f" · {self.do_code(root)}" if open_editor else ""
-        return f"built {root}/ with {len(files)} files{opened}"
+        out = [f"built {root}/ with {len(files)} files (incl. ARCHITECTURE.md)"
+               + (f" · self-healed {healed}" if healed else "")]
+        if open_editor:
+            out.append(self.do_code(root))
+        run_cmd = str(plan.get("run") or "").strip()
+        if run_cmd:
+            try:
+                r = subprocess.run(run_cmd, shell=True, cwd=root, capture_output=True,
+                                   text=True, timeout=30)
+                out.append(f"▶ ran: {run_cmd}\n" + (r.stdout or r.stderr or "(no output)").strip()[:600])
+            except Exception as e:
+                out.append(f"▶ run skipped ({e})")
+        return "\n".join(out)
+
+    # ── natural language → action (no slash needed) ──────────────────────────
+    def do_intent(self, text: str, confirm=None) -> str:
+        """Route a plain-English request to the right power."""
+        low = text.lower()
+        # fast offline paths first
+        m = re.search(r"(?:folder|directory)(?:\s+(?:called|named))?\s+([\w./~-]+)", text, re.I)
+        wants_project = re.search(r"\b(project|tool|app)\b", low)
+        if re.search(r"vs ?code|editor", low) and re.search(r"\bopen\b", low) and not wants_project:
+            mp = re.search(r"(?:open|in)\s+([~./][\w./-]*)", text)
+            return self.do_code(mp.group(1) if mp else ".")
+        if m and re.search(r"\b(create|make|new)\b", low) and not wants_project \
+                and not re.search(r"\b(file|code|script)\b", low):
+            return self.do_mkdir(m.group(1))
+        if not self.live:
+            return self.do_chat(text)  # can't plan actions without a model
+        act = parse_action(chat([{"role": "system", "content": INTENT_SYS},
+                                 {"role": "user", "content": text}], fmt_json=True))
+        intent = act.get("intent", "chat")
+        if intent == "mkdir" and act.get("path"):
+            return self.do_mkdir(act["path"])
+        if intent == "open_editor":
+            return self.do_code(act.get("path") or ".")
+        if intent == "write_file":
+            return self.do_write(act.get("file") or "main.py",
+                                 act.get("spec") or text, confirm=confirm)
+        if intent == "build_project":
+            return self.do_build(text, confirm=confirm)
+        return self.do_chat(text)
+
+    def route(self, text: str) -> str:
+        return self.do_intent(text) if ACTION_HINT.search(text) else self.do_chat(text)
 
     def do_action(self, task: str, confirm=None) -> str:
         """Operator mode: the model proposes ONE shell command; runs only on your explicit y."""
@@ -398,7 +493,7 @@ class Session:
             return self.do_build(i) if i else "usage: /build <project idea>"
         if line.startswith("/"):
             return f"unknown command {line.split()[0]} — try /help"
-        return self.do_chat(line)
+        return self.route(line)  # plain english: action if it sounds like one, else chat
 
     # styled wrapper around handle() for the live REPL (tests use handle() directly)
     def render(self, line: str) -> str:

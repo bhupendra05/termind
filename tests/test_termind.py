@@ -205,3 +205,50 @@ def test_write_and_build_need_live_model():
     s = _session()
     assert "needs a live model" in s.do_write("x.py", "anything")
     assert "needs a live model" in s.do_build("anything")
+
+
+def test_natural_language_creates_folder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    s = _session()
+    out = s.handle("create a folder called demo-zone")     # no slash, offline
+    assert "created folder" in out and (tmp_path / "demo-zone").is_dir()
+
+
+def test_natural_language_opens_vscode(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r.Session, "do_code", lambda self, p=".": f"CODE:{p}")
+    assert _session().handle("open vs code").startswith("CODE:")
+
+
+def test_natural_language_builds_project(monkeypatch):
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat",
+                        lambda *a, **k: _json.dumps({"intent": "build_project"}))
+    monkeypatch.setattr(r.Session, "do_build",
+                        lambda self, idea, confirm=None, open_editor=True: f"BUILD:{idea}")
+    s = r.Session(live=True)
+    assert s.handle("create a new tool that tracks my expenses").startswith("BUILD:")
+
+
+def test_plain_questions_still_chat():
+    out = _session().handle("what is the capital of france?")   # no action words
+    assert "offline brain" in out                                # routed to chat, not actions
+
+
+def test_codegen_self_heals_broken_python(tmp_path, monkeypatch):
+    import termind.repl as r
+    replies = iter(['print("hi"',                       # broken (missing paren)
+                    'print("hi")'])                     # the model's fix
+    monkeypatch.setattr(r, "chat", lambda *a, **k: next(replies))
+    s = r.Session(live=True)
+    f = str(tmp_path / "ok.py")
+    out = s.do_write(f, "print hi", confirm=lambda _: "y")
+    assert "wrote" in out and open(f).read() == 'print("hi")\n'   # healed before writing
+
+
+def test_py_error_detects_and_passes():
+    from termind.repl import Session
+    assert Session._py_error("x.py", "def broken(:") is not None
+    assert Session._py_error("x.py", "a = 1") is None
+    assert Session._py_error("notes.md", "anything (((") is None  # only checks .py

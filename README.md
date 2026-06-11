@@ -24,6 +24,8 @@ termind                          # ← a local agent, in any terminal
 │  just type        chat with your local model (gemma3)
 │  /index <folder>  index your notes/docs/code (stays local)
 │  /ask <question>  answer from YOUR docs, with source cites
+│  /build <idea>    scaffold project · code · VS Code · run
+│  or just say it   "create a folder x" · "build a tool…"
 │  /status          model · credits spent · sandbox audit
 │  /help            show this again        /exit  quit
 └────────────────────────────────────────────────────────────┘
