@@ -345,3 +345,35 @@ def test_web_server_state_and_send(monkeypatch):
     rep = json.loads(urllib.request.urlopen(req, timeout=5).read())
     assert "hello from the model" in rep["reply"]
     httpd.server_close()
+
+
+def test_chat_sessions_new_open_and_persist():
+    s = _session()
+    s.handle("hello first chat")                       # auto-creates + titles a chat
+    first = s.chats_list()[0]
+    assert first["title"].startswith("hello first")
+    s.handle("/chat new")
+    s.handle("now a second chat")
+    assert len(s.chats_list()) == 2
+    out = s.handle("/chat 2")                          # open the older one by index
+    assert "resumed" in out and any("first chat" in m["content"] for m in s.history)
+    s2 = _session()                                    # restart: active chat restored
+    assert len(s2.chats_list()) == 2 and s2.history
+
+
+def test_web_chats_api(monkeypatch):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    s = r.Session(live=False)
+    s.handle("remember this conversation")
+    httpd, url = serve(s, port=8801, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(url + "/api/chats", timeout=3).read())
+    assert d["chats"] and d["messages"]
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    req = urllib.request.Request(url + "/api/chat", data=json.dumps({"op": "new"}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    d2 = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    assert d2["messages"] == [] and len(d2["chats"]) == 2
+    httpd.server_close()

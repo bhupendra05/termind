@@ -77,6 +77,7 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/write <file> <spec>{N} {D}» generate one file (preview + y/N){N}
 {CY}║{N}  {GR}◉{N} {WH}/mkdir <path>{N}  {D}» create folder{N}   {GR}◉{N} {WH}/code <path>{N}  {D}» open VS Code{N}
 {CY}║{N}  {PK}◆{N} {WH}or just say it{N}  {D}» "create a folder x" · "build a tool that…"{N}
+{CY}║{N}  {GR}◉{N} {WH}/chats{N} {D}» past conversations{N}  {GR}◉{N} {WH}/chat new{N} {D}» fresh chat{N}
 {CY}║{N}  {GR}◉{N} {WH}/model [name]{N}    {D}»{N} list · switch your brain (any Ollama model)
 {CY}║{N}  {GR}◉{N} {WH}/pull <name>{N}     {D}»{N} download a new model (llama3.2, qwen2.5…)
 {CY}║{N}  {GR}◉{N} {WH}/remember <fact>{N} {D}»{N} teach it about you · survives restarts
@@ -197,8 +198,53 @@ class Session:
         for key, e in self.store["docs"].items():
             self.k.syscall("mem.put", key=key, value=e["value"], tags=e.get("tags", []))
         self.chunks = len(self.store["docs"])
-        self.history = list(self.store["history"])  # conversation survives restarts too
+        # conversations: resume the active chat (migrating any pre-chats history once)
+        if self.store["history"] and not self.store["chats"]:
+            self.chat_new(title="Earlier conversation")
+            self.store["chats"][self.store["active_chat"]]["messages"] = \
+                list(self.store["history"])
+        cid = self.store.get("active_chat")
+        self.history = list(self.store["chats"].get(cid, {}).get("messages", [])) \
+            if cid else list(self.store["history"])
         self.actions = 0
+
+    # ── chat sessions: new chat, continue previous, switch ───────────────────
+    def _new_chat_id(self) -> str:
+        return f"{int(time.time() * 1000)}-{len(self.store['chats'])}"  # collision-proof
+
+    def chat_new(self, title: str = "New chat") -> str:
+        cid = self._new_chat_id()
+        self.store["chats"][cid] = {"title": title, "ts": time.time(), "messages": []}
+        self.store["active_chat"] = cid
+        self.history = []
+        store_save(self.store)
+        return cid
+
+    def chat_open(self, cid: str) -> bool:
+        c = self.store["chats"].get(cid)
+        if not c:
+            return False
+        self.store["active_chat"] = cid
+        self.history = list(c.get("messages", []))
+        store_save(self.store)
+        return True
+
+    def chats_list(self) -> list:
+        items = sorted(self.store["chats"].items(), key=lambda kv: -kv[1].get("ts", 0))
+        return [{"id": k, "title": v.get("title", "Chat"),
+                 "active": k == self.store.get("active_chat")} for k, v in items]
+
+    def _save_chat(self, first_user_text: str) -> None:
+        cid = self.store.get("active_chat")
+        if not cid or cid not in self.store["chats"]:
+            # create the record inline — chat_new() would wipe the history we're saving
+            cid = self._new_chat_id()
+            self.store["chats"][cid] = {"title": "New chat", "ts": time.time(), "messages": []}
+            self.store["active_chat"] = cid
+        c = self.store["chats"][cid]
+        c["messages"] = self.history[-40:]
+        if c.get("title") in ("New chat", "", None):
+            c["title"] = first_user_text.strip()[:48]
 
     def do_index(self, folder: str) -> str:
         entries = index_folder(folder)
@@ -534,7 +580,8 @@ class Session:
             reply = self._chat(msgs) if self.live else offline_chat(msgs)
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": reply}]
-        self.store["history"] = self.history[-20:]   # conversation survives restarts
+        self.store["history"] = self.history[-20:]   # legacy field (kept for compat)
+        self._save_chat(text)                        # persist into the active chat session
         note = ""
         if AUTO_FACT.search(text) and text not in self.store["facts"]:
             self.do_remember(text, auto=True)        # auto-memory: it learns you from chat
@@ -580,6 +627,24 @@ class Session:
         if line.startswith("/think"):
             q = line[6:].strip()
             return self.do_think(q) if q else "usage: /think <hard question>"
+        if line.startswith("/chats"):
+            rows = self.chats_list()
+            if not rows:
+                return "no chats yet — just start talking, or /chat new"
+            return "\n".join(("★ " if c["active"] else "  ") + f"{i+1}. {c['title']}"
+                             for i, c in enumerate(rows)) + "\nopen: /chat <number> · fresh: /chat new"
+        if line.startswith("/chat"):
+            arg = line[5:].strip()
+            if arg == "new" or not arg:
+                self.chat_new()
+                return "fresh chat started (the old one is saved in /chats)"
+            rows = self.chats_list()
+            try:
+                cid = rows[int(arg) - 1]["id"]
+            except (ValueError, IndexError):
+                return "usage: /chat new · /chat <number from /chats>"
+            self.chat_open(cid)
+            return f"resumed: {self.store['chats'][cid]['title']} ({len(self.history)} messages)"
         if line.startswith("/model"):
             return self.do_model(line[6:].strip())
         if line.startswith("/pull"):
@@ -642,6 +707,8 @@ class Session:
             return _panel("DEEP THOUGHT", out.replace("\n", f"\n{CY}│{N} "), CY)
         if s.startswith(("/model", "/pull")):
             return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
+        if s.startswith(("/chats", "/chat")):
+            return _panel("SESSIONS", out.replace("\n", f"\n{CY}│{N} "), CY)
         if s.startswith("/do"):
             return _panel("OPERATOR", out.replace("\n", f"\n{YL}│{N} "), YL)
         if s.startswith(("/build", "/write", "/mkdir", "/code")):

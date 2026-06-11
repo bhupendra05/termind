@@ -120,3 +120,25 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a single glowing command **`$ termind`** with a neon split forking into TWO panels — left a dark cyberpunk **terminal** (ASCII ▲ TERMIND banner, prompt line), right a **browser window** showing a Claude-style chat with message bubbles and a model dropdown. A bright violet **"shared brain"** chip with a neural icon sits on the line connecting them, labeled "one memory · one model." Top headline in bold charcoal: **"One command. Terminal + web. Same local brain."** Subtitle: "termind v0.4 · local Gemma/Ollama · private · $0/query · localhost only." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.5 — Sessions & the Claude-style redesign
+
+### 📣 Post
+
+> **termind v0.5 — my local agent now has conversations, not just messages.**
+>
+> 💬 **Chat sessions** — a sidebar of every past conversation. Click one and continue exactly where you left off; "New chat" starts fresh while the old one stays saved. Works in the terminal too: `/chats`, `/chat new`, `/chat 2`.
+> 🎨 **Full redesign** — warm grey, Claude-style interface: sidebar, message bubbles, clay accent, greeting screen with starter chips. It finally *feels* like a real assistant — but it's a 9KB page served by Python's stdlib from localhost.
+> 🧠 Same shared brain as the terminal: one memory, one model, sessions visible in both.
+>
+> Private · $0/query · any Ollama model · sandboxed on AION · 44 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #Ollama #AgenticAI #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a large browser window in a warm dark-grey (#262624) Claude-style chat UI: left sidebar with a "✚ New chat" button and a list of conversation titles (one highlighted), main pane with rounded user bubbles and plain assistant replies, a clay-orange accent (#d97757) send button, and a model dropdown in the header. A small badge over the sidebar reads **"continue any conversation."** Top headline in bold charcoal: **"Your local agent, now with sessions."** Subtitle: "termind v0.5 · Claude-style UI · one brain with your terminal · private · $0/query." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
