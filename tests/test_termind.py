@@ -272,3 +272,10 @@ def test_dry_run_swaps_python_for_python3(monkeypatch):
 def test_dry_run_passes_existing_binaries():
     from termind.repl import Session
     assert Session._dry_run("echo hi").startswith("echo")
+
+
+def test_thinking_spinner_is_safe_without_tty(capsys):
+    from termind.repl import Thinking
+    with Thinking("test"):
+        pass                                            # piped: must not animate or crash
+    assert capsys.readouterr().out == ""                # zero garbage when not a TTY

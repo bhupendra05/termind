@@ -5,6 +5,7 @@ chat goes straight to the local model. /status shows the audited spend.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import os
@@ -12,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 from aion import Capabilities, Kernel
@@ -104,6 +106,39 @@ def _boot(live: bool, server: bool) -> None:
     else:
         core = f"{YL}[OFFLINE BRAIN — ./setup.sh to install]{N}"
     print(f"  {GR}▸{N} {'neural core':<20} {core}\n")
+
+
+class Thinking:
+    """Claude-style activity indicator: an animated neon spinner while the model works.
+    Only animates on a real terminal (silent when piped, so tests/scripts stay clean)."""
+
+    FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self, label: str = "thinking") -> None:
+        self.label = label
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        t0 = time.time()
+        for f in itertools.cycle(self.FRAMES):
+            if self._stop.is_set():
+                break
+            sys.stdout.write(f"\r  {PK}{f}{N} {D}{self.label}… {time.time()-t0:.0f}s{N}  ")
+            sys.stdout.flush()
+            time.sleep(0.08)
+        sys.stdout.write("\r" + " " * (len(self.label) + 16) + "\r")
+        sys.stdout.flush()
+
+    def __enter__(self) -> "Thinking":
+        if sys.stdout.isatty():
+            self._t.start()
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self._stop.set()
+        if self._t.is_alive():
+            self._t.join(timeout=0.3)
 
 
 def _panel(title: str, body: str, color: str = PU) -> str:
@@ -208,22 +243,23 @@ class Session:
 
     def do_think(self, q: str) -> str:
         """Escalation ladder for hard questions: big local model → Claude → deep local CoT."""
-        big = os.environ.get("TERMIND_BIG_MODEL")
-        if big and self.live:
-            try:
-                return chat(self.chat_messages(q + "\n\nThink step by step."), model=big)
-            except RuntimeError:
-                pass  # big model not pulled → next rung
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            try:
-                return claude_chat(self.chat_messages(q))
-            except Exception:
-                pass  # cloud unreachable → next rung
-        if self.live:
-            return chat(self.chat_messages(
-                "This is a HARD question. Reason step by step, check yourself, "
-                "then give the answer:\n" + q))
-        return offline_chat(self.chat_messages(q))
+        with Thinking("deep thinking"):
+            big = os.environ.get("TERMIND_BIG_MODEL")
+            if big and self.live:
+                try:
+                    return chat(self.chat_messages(q + "\n\nThink step by step."), model=big)
+                except RuntimeError:
+                    pass  # big model not pulled → next rung
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                try:
+                    return claude_chat(self.chat_messages(q))
+                except Exception:
+                    pass  # cloud unreachable → next rung
+            if self.live:
+                return chat(self.chat_messages(
+                    "This is a HARD question. Reason step by step, check yourself, "
+                    "then give the answer:\n" + q))
+            return offline_chat(self.chat_messages(q))
 
     # ── builder powers: folders, code files, whole projects, VS Code ─────────
     @staticmethod
@@ -256,18 +292,19 @@ class Session:
         gets the error back and fixes its own code (up to 2 repair rounds)."""
         sys_p = ("You write complete, working file contents. Reply ONLY with the raw file "
                  "content — no markdown fences, no commentary.")
-        content = self._strip_fences(chat([
-            {"role": "system", "content": sys_p},
-            {"role": "user", "content": f"Write the file {file}. It should: {spec}"}]))
-        for _ in range(2):
-            err = self._py_error(file, content)
-            if not err:
-                break
+        with Thinking(f"writing {os.path.basename(file)}"):
             content = self._strip_fences(chat([
                 {"role": "system", "content": sys_p},
-                {"role": "user", "content":
-                 f"This {file} has a syntax error ({err}). Reply with the FULL corrected "
-                 f"file content only:\n\n{content}"}]))
+                {"role": "user", "content": f"Write the file {file}. It should: {spec}"}]))
+            for _ in range(2):
+                err = self._py_error(file, content)
+                if not err:
+                    break
+                content = self._strip_fences(chat([
+                    {"role": "system", "content": sys_p},
+                    {"role": "user", "content":
+                     f"This {file} has a syntax error ({err}). Reply with the FULL corrected "
+                     f"file content only:\n\n{content}"}]))
         return content
 
     @staticmethod
@@ -319,15 +356,16 @@ class Session:
         """The full pipeline: plan → folder → code → ARCHITECTURE.md → VS Code → run."""
         if not self.live:
             return "project building needs a live model — install Ollama (./setup.sh)"
-        plan = parse_action(chat([
-            {"role": "system", "content":
-             'Scaffold a SMALL working starter project (2-5 short files). Reply with EXACTLY '
-             '{"folder": "<kebab-name>", "files": {"<relative path>": "<full file content>"}, '
-             '"run": "<shell command to run it from inside the folder>"}. '
-             "files MUST include README.md and ARCHITECTURE.md (explain the design: components, "
-             "data flow, why). Keep code short and working. In the run command always use "
-             "python3, never bare python."},
-            {"role": "user", "content": idea}], fmt_json=True))
+        with Thinking("planning your project"):
+            plan = parse_action(chat([
+                {"role": "system", "content":
+                 'Scaffold a SMALL working starter project (2-5 short files). Reply with EXACTLY '
+                 '{"folder": "<kebab-name>", "files": {"<relative path>": "<full file content>"}, '
+                 '"run": "<shell command to run it from inside the folder>"}. '
+                 "files MUST include README.md and ARCHITECTURE.md (explain the design: "
+                 "components, data flow, why). Keep code short and working. In the run command "
+                 "always use python3, never bare python."},
+                {"role": "user", "content": idea}], fmt_json=True))
         folder, files = plan.get("folder"), plan.get("files") or {}
         if not folder or not files:
             return "couldn't plan that project — try rephrasing."
@@ -379,8 +417,9 @@ class Session:
             return self.do_mkdir(m.group(1))
         if not self.live:
             return self.do_chat(text)  # can't plan actions without a model
-        act = parse_action(chat([{"role": "system", "content": INTENT_SYS},
-                                 {"role": "user", "content": text}], fmt_json=True))
+        with Thinking("parsing your intent"):
+            act = parse_action(chat([{"role": "system", "content": INTENT_SYS},
+                                     {"role": "user", "content": text}], fmt_json=True))
         intent = act.get("intent", "chat")
         if intent == "mkdir" and act.get("path"):
             return self.do_mkdir(act["path"])
@@ -400,11 +439,12 @@ class Session:
         """Operator mode: the model proposes ONE shell command; runs only on your explicit y."""
         if not self.live:
             return "operator mode needs a live model — install Ollama (./setup.sh)"
-        act = parse_action(chat([
-            {"role": "system", "content":
-             'Propose ONE safe macOS shell command for the task. Reply with EXACTLY '
-             '{"cmd": "<command>", "why": "<one line>"}. Never propose destructive commands.'},
-            {"role": "user", "content": task}], fmt_json=True))
+        with Thinking("proposing a command"):
+            act = parse_action(chat([
+                {"role": "system", "content":
+                 'Propose ONE safe macOS shell command for the task. Reply with EXACTLY '
+                 '{"cmd": "<command>", "why": "<one line>"}. Never propose destructive commands.'},
+                {"role": "user", "content": task}], fmt_json=True))
         cmd = act.get("cmd", "")
         if not cmd:
             return "couldn't form a command for that."
@@ -427,7 +467,8 @@ class Session:
         think = (lambda m: chat(m, fmt_json=True)) if self.live else offline_ask_think
         pid = self.k.spawn("termind-ask", fn=_ask_agent, args=(q, think),
                            caps=Capabilities(["mem.search", "mem.get"]), budget=5.0)
-        self.k.run()
+        with Thinking("querying your data"):
+            self.k.run()
         p = self.k.processes[pid]
         self.spent += p.meter.credits
         self.denied = self.k.meter.denied
@@ -448,7 +489,8 @@ class Session:
 
     def do_chat(self, text: str) -> str:
         msgs = self.chat_messages(text)
-        reply = chat(msgs) if self.live else offline_chat(msgs)
+        with Thinking("neural core thinking"):
+            reply = chat(msgs) if self.live else offline_chat(msgs)
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": reply}]
         self.store["history"] = self.history[-20:]   # conversation survives restarts
