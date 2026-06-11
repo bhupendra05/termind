@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 
-EMPTY = {"facts": [], "docs": {}}
+EMPTY = {"facts": [], "docs": {}, "history": [], "vecs": {}}
 
 
 def store_path() -> str:
@@ -22,9 +22,10 @@ def load() -> dict:
     try:
         with open(store_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
-        return {"facts": list(data.get("facts", [])), "docs": dict(data.get("docs", {}))}
+        return {"facts": list(data.get("facts", [])), "docs": dict(data.get("docs", {})),
+                "history": list(data.get("history", [])), "vecs": dict(data.get("vecs", {}))}
     except Exception:
-        return {"facts": [], "docs": {}}
+        return {"facts": [], "docs": {}, "history": [], "vecs": {}}
 
 
 def save(data: dict) -> None:

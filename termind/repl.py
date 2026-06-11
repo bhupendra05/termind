@@ -6,6 +6,10 @@ chat goes straight to the local model. /status shows the audited spend.
 from __future__ import annotations
 
 import json
+import math
+import os
+import re
+import subprocess
 import sys
 import time
 
@@ -13,8 +17,13 @@ from aion import Capabilities, Kernel
 
 from . import __version__
 from .indexer import index_folder
-from .llm import MODEL, chat, model_available, offline_chat, ollama_available, parse_action
+from .llm import (MODEL, chat, claude_chat, embed, model_available, offline_chat,
+                  ollama_available, parse_action)
 from .store import load as store_load, save as store_save
+
+# Auto-memory: sentences where the user states something about themselves get remembered.
+AUTO_FACT = re.compile(
+    r"\b(i am|i'm|my name is|i work|i live|i like|i prefer|i use|i build|call me)\b", re.I)
 
 # ── neon palette (256-color ANSI) ────────────────────────────────────────────
 CY = "\033[38;5;51m"     # electric cyan
@@ -44,8 +53,10 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}just type{N}        {D}»{N} neural chat with local core {PU}⟨{MODEL}⟩{N}
 {CY}║{N}  {GR}◉{N} {WH}/index <folder>{N}  {D}»{N} absorb your files into agent memory
 {CY}║{N}  {GR}◉{N} {WH}/ask <question>{N}  {D}»{N} query YOUR data · answers cite sources
+{CY}║{N}  {GR}◉{N} {WH}/think <hard q>{N}  {D}»{N} escalate: big model › cloud › deep local
+{CY}║{N}  {GR}◉{N} {WH}/do <task>{N}       {D}»{N} proposes a shell command · runs on YOUR y/N
 {CY}║{N}  {GR}◉{N} {WH}/remember <fact>{N} {D}»{N} teach it about you · survives restarts
-{CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} search everything it remembers
+{CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} embedding search over all memories
 {CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
 {CY}║{N}  {GR}◉{N} {WH}/help{N}  {D}» this panel{N}      {GR}◉{N} {WH}/exit{N}  {D}» jack out{N}
 {CY}╚════════════════════════════════════════════════════════════════╝{N}
@@ -125,6 +136,8 @@ class Session:
         for key, e in self.store["docs"].items():
             self.k.syscall("mem.put", key=key, value=e["value"], tags=e.get("tags", []))
         self.chunks = len(self.store["docs"])
+        self.history = list(self.store["history"])  # conversation survives restarts too
+        self.actions = 0
 
     def do_index(self, folder: str) -> str:
         entries = index_folder(folder)
@@ -136,19 +149,85 @@ class Session:
         srcs = len({e["source"] for e in entries})
         return f"indexed {srcs} files → {len(entries)} chunks (all local · remembered)"
 
-    def do_remember(self, fact: str) -> str:
+    def do_remember(self, fact: str, auto: bool = False) -> str:
+        key = f"fact#{len(self.store['facts'])}"
         self.store["facts"].append(fact)
+        self.k.syscall("mem.put", key=key, value=fact, tags=["fact"])
+        if self.live:  # upgrade memory with a real embedding when a model is available
+            vecs = embed([fact])
+            if vecs:
+                self.store["vecs"][key] = vecs[0]
         store_save(self.store)
-        self.k.syscall("mem.put", key=f"fact#{len(self.store['facts'])-1}",
-                       value=fact, tags=["fact"])
-        return f"remembered ({len(self.store['facts'])} facts on file): {fact}"
+        tag = "auto-remembered" if auto else "remembered"
+        return f"{tag} ({len(self.store['facts'])} facts on file): {fact}"
+
+    @staticmethod
+    def _cos(a, b) -> float:
+        num = sum(x * y for x, y in zip(a, b))
+        da = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+        return num / da if da else 0.0
 
     def do_recall(self, query: str) -> str:
+        # embeddings first (true semantic recall), lexical kernel search as fallback
+        if self.live and self.store["vecs"]:
+            qv = embed([query])
+            if qv:
+                scored = sorted(((self._cos(qv[0], v), k) for k, v in self.store["vecs"].items()),
+                                reverse=True)[:3]
+                vals = {**{f"fact#{i}": f for i, f in enumerate(self.store["facts"])},
+                        **{k: e["value"] for k, e in self.store["docs"].items()}}
+                hits = [(s, k, vals.get(k, "")) for s, k in scored if s > 0.3]
+                if hits:
+                    return "\n".join(f"{s:.2f}  [{k}]  " + " ".join(str(v).split())[:160]
+                                     for s, k, v in hits)
         hits = self.k.syscall("mem.search", query=query, top_k=3)["result"]
         if not hits:
             return "no memories match."
         return "\n".join(f"{h['score']:.2f}  [{h['key']}]  "
                          + " ".join(str(h['value']).split())[:160] for h in hits)
+
+    def do_think(self, q: str) -> str:
+        """Escalation ladder for hard questions: big local model → Claude → deep local CoT."""
+        big = os.environ.get("TERMIND_BIG_MODEL")
+        if big and self.live:
+            try:
+                return chat(self.chat_messages(q + "\n\nThink step by step."), model=big)
+            except RuntimeError:
+                pass  # big model not pulled → next rung
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            try:
+                return claude_chat(self.chat_messages(q))
+            except Exception:
+                pass  # cloud unreachable → next rung
+        if self.live:
+            return chat(self.chat_messages(
+                "This is a HARD question. Reason step by step, check yourself, "
+                "then give the answer:\n" + q))
+        return offline_chat(self.chat_messages(q))
+
+    def do_action(self, task: str, confirm=None) -> str:
+        """Operator mode: the model proposes ONE shell command; runs only on your explicit y."""
+        if not self.live:
+            return "operator mode needs a live model — install Ollama (./setup.sh)"
+        act = parse_action(chat([
+            {"role": "system", "content":
+             'Propose ONE safe macOS shell command for the task. Reply with EXACTLY '
+             '{"cmd": "<command>", "why": "<one line>"}. Never propose destructive commands.'},
+            {"role": "user", "content": task}], fmt_json=True))
+        cmd = act.get("cmd", "")
+        if not cmd:
+            return "couldn't form a command for that."
+        print(f"\n  {YL}⚡ proposed:{N} {WH}{cmd}{N}\n  {D}{act.get('why', '')}{N}")
+        ans = (confirm or input)(f"  {PK}execute? [y/N]{N} ")
+        if str(ans).strip().lower() != "y":
+            return "aborted — nothing was run."
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            self.actions += 1
+            out = (r.stdout or r.stderr or "(no output)").strip()[:1500]
+            return f"$ {cmd}\n{out}"
+        except subprocess.TimeoutExpired:
+            return "command timed out (60s cap)."
 
     def do_ask(self, q: str) -> str:
         think = (lambda m: chat(m, fmt_json=True)) if self.live else offline_ask_think
@@ -174,7 +253,13 @@ class Session:
         reply = chat(msgs) if self.live else offline_chat(msgs)
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": reply}]
-        return reply
+        self.store["history"] = self.history[-20:]   # conversation survives restarts
+        note = ""
+        if AUTO_FACT.search(text) and text not in self.store["facts"]:
+            self.do_remember(text, auto=True)        # auto-memory: it learns you from chat
+            note = f"\n{D}◆ auto-remembered this about you{N}"
+        store_save(self.store)
+        return reply + note
 
     def do_status(self) -> str:
         if self.live:
@@ -184,7 +269,8 @@ class Session:
         else:
             brain = "offline brain (run ./setup.sh)"
         return (f"brain: {brain} · facts remembered: {len(self.store['facts'])} · "
-                f"indexed chunks: {self.chunks} · credits spent: {self.spent:.2f} · "
+                f"indexed chunks: {self.chunks} · chat turns kept: {len(self.history)} · "
+                f"actions run: {getattr(self, 'actions', 0)} · credits spent: {self.spent:.2f} · "
                 f"denied by sandbox: {self.denied} · data off-machine: 0 bytes")
 
     def handle(self, line: str) -> str:
@@ -209,6 +295,12 @@ class Session:
         if line.startswith("/recall"):
             q = line[7:].strip()
             return self.do_recall(q) if q else "usage: /recall <query>"
+        if line.startswith("/think"):
+            q = line[6:].strip()
+            return self.do_think(q) if q else "usage: /think <hard question>"
+        if line.startswith("/do"):
+            t = line[3:].strip()
+            return self.do_action(t) if t else "usage: /do <task in plain english>"
         if line.startswith("/"):
             return f"unknown command {line.split()[0]} — try /help"
         return self.do_chat(line)
@@ -231,6 +323,10 @@ class Session:
             return _panel("MEMORY WRITTEN", f"{GR}{out}{N}", PU)
         if s.startswith("/recall"):
             return _panel("MEMORY RECALL", out.replace("\n", f"\n{PU}│{N} "), PU)
+        if s.startswith("/think"):
+            return _panel("DEEP THOUGHT", out.replace("\n", f"\n{CY}│{N} "), CY)
+        if s.startswith("/do"):
+            return _panel("OPERATOR", out.replace("\n", f"\n{YL}│{N} "), YL)
         if s.startswith("/"):
             return f"{YL}{out}{N}"
         return _panel("NEURAL CORE", out, PK)

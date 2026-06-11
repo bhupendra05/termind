@@ -120,3 +120,33 @@ def test_facts_injected_into_chat_system_prompt():
     s.handle("/remember my name is Bhupendra")
     msgs = s.chat_messages("hello")
     assert "Bhupendra" in msgs[0]["content"] and msgs[0]["role"] == "system"
+
+
+def test_auto_memory_learns_from_chat():
+    s = _session()
+    s.handle("i am Bhupendra and I build agent infrastructure")
+    assert any("Bhupendra" in f for f in s.store["facts"])     # learned without /remember
+
+
+def test_chat_history_survives_restart():
+    s1 = _session()
+    s1.handle("hello there")
+    s2 = _session()
+    assert len(s2.history) >= 2                                 # conversation restored
+
+
+def test_think_works_offline():
+    out = _session().handle("/think why is the sky blue?")
+    assert isinstance(out, str) and out                          # bottom rung never crashes
+
+
+def test_do_requires_live_model():
+    assert "needs a live model" in _session().handle("/do list my files")
+
+
+def test_do_executes_only_on_yes(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: '{"cmd": "echo termind-ok", "why": "test"}')
+    s = r.Session(live=True)
+    assert "termind-ok" in s.do_action("say ok", confirm=lambda _: "y")     # ran with consent
+    assert "aborted" in s.do_action("say ok", confirm=lambda _: "n")        # refused without
