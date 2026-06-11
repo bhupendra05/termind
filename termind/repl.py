@@ -324,7 +324,12 @@ class Session:
 
     def do_code(self, path: str) -> str:
         full = os.path.expanduser(path or ".")
-        for cmd in (["code", full], ["open", "-a", "Visual Studio Code", full]):
+        apps = [["code", full]]
+        if os.environ.get("TERMIND_VSCODE"):          # custom app name, e.g. "Visual Studio Code 2"
+            apps.append(["open", "-a", os.environ["TERMIND_VSCODE"], full])
+        apps += [["open", "-a", "Visual Studio Code", full],
+                 ["open", "-a", "Visual Studio Code 2", full]]
+        for cmd in apps:
             try:
                 subprocess.run(cmd, check=True, capture_output=True, timeout=20)
                 self.actions += 1
