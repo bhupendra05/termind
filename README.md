@@ -13,12 +13,21 @@ terminal that shows you everything it can do the moment it opens.
 ```bash
 git clone https://github.com/bhupendra05/termind
 cd termind && ./setup.sh        # installs venv + AION + Ollama + model (asks first)
-termind                          # ← a local agent, in any terminal
+termind                          # ← boots the terminal REPL AND a local web UI
 ```
+
+`termind` opens **two surfaces sharing one brain**: the cyberpunk terminal REPL *and* a
+local Claude-style web chat (auto-opens in your browser). Whatever you teach it, build, or
+`/remember` in one shows up in the other. The web UI has a model picker, runs every command,
+and binds to **localhost only** — nothing leaves your machine.
+
+- `termind` — terminal + web (default)
+- `termind --no-web` — terminal only
+- `termind --web` — web UI only
 
 ```
   ▀█▀ █▀▀ █▀█ █▀▄▀█ █ █▄░█ █▀▄
-  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v0.3.0 · local agent · on AION
+  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v0.4.0 · local agent · on AION
 
 ┌─ FEATURES ─────────────────────────────────────────────────┐
 │  just type        chat with your local model (gemma3)

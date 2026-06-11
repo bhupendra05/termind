@@ -1,2 +1,2 @@
 """termind — a local AI agent that lives in your terminal."""
-__version__ = "0.3.0"
+__version__ = "0.4.0"

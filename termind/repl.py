@@ -188,6 +188,8 @@ class Session:
         self.chunks = 0
         self.spent = 0.0
         self.denied = 0
+        self._confirm = input            # how y/N prompts are answered (web overrides this)
+        self._lock = threading.Lock()    # serialize terminal + web access to one shared brain
         # persistent memory: reload facts + indexed docs from the last session
         self.store = store_load()
         for i, fact in enumerate(self.store["facts"]):
@@ -352,7 +354,7 @@ class Session:
         preview = "\n".join(content.splitlines()[:15])
         print(f"\n  {YL}⚡ will write {WH}{file}{N} {D}({len(content.splitlines())} lines){N}\n"
               f"{D}{preview}{N}\n")
-        if str((confirm or input)(f"  {PK}write it? [y/N]{N} ")).strip().lower() != "y":
+        if str((confirm or self._confirm)(f"  {PK}write it? [y/N]{N} ")).strip().lower() != "y":
             return "aborted — nothing was written."
         full = os.path.expanduser(file)
         os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
@@ -380,7 +382,7 @@ class Session:
             return "couldn't plan that project — try rephrasing."
         print(f"\n  {YL}⚡ will create {WH}{folder}/{N} {D}with {len(files)} files:{N} "
               + ", ".join(files) + "\n")
-        if str((confirm or input)(f"  {PK}build it? [y/N]{N} ")).strip().lower() != "y":
+        if str((confirm or self._confirm)(f"  {PK}build it? [y/N]{N} ")).strip().lower() != "y":
             return "aborted — nothing was created."
         root = os.path.expanduser(folder)
         healed = 0
@@ -458,7 +460,7 @@ class Session:
         if not cmd:
             return "couldn't form a command for that."
         print(f"\n  {YL}⚡ proposed:{N} {WH}{cmd}{N}\n  {D}{act.get('why', '')}{N}")
-        ans = (confirm or input)(f"  {PK}execute? [y/N]{N} ")
+        ans = (confirm or self._confirm)(f"  {PK}execute? [y/N]{N} ")
         if str(ans).strip().lower() != "y":
             return "aborted — nothing was run."
         checked = self._dry_run(cmd)
@@ -603,6 +605,21 @@ class Session:
             return f"unknown command {line.split()[0]} — try /help"
         return self.route(line)  # plain english: action if it sounds like one, else chat
 
+    def handle_web(self, line: str) -> str:
+        """Same agent, driven from the web UI. There's no stdin, so a user's message IS the
+        consent for the action it requested (file/project writes auto-approve; VS Code can't
+        open from a server context, so build skips the editor step)."""
+        prev = self._confirm
+        self._confirm = lambda _p="": "y"   # the send itself is the y/N
+        try:
+            if line.strip().lower().startswith(("/build", "create", "make", "build", "new")) \
+                    and "project" in line.lower() or line.strip().startswith("/build"):
+                idea = line.split(None, 1)[1] if line.strip().startswith("/build") else line
+                return self.do_build(idea, open_editor=False)
+            return self.handle(line)
+        finally:
+            self._confirm = prev
+
     # styled wrapper around handle() for the live REPL (tests use handle() directly)
     def render(self, line: str) -> str:
         out = self.handle(line)
@@ -634,13 +651,15 @@ class Session:
         return _panel("NEURAL CORE", out, PK)
 
 
-def run() -> int:
-    s = Session()
+def run(session: "Session" = None, web_url: str = None) -> int:
+    s = session or Session()
     print(BANNER)
     _boot(s.live, getattr(s, "server", False))
     if s.store["facts"] or s.store["docs"]:
         print(f"  {PU}◆{N} {D}memory restored:{N} {WH}{len(s.store['facts'])}{N}{D} facts · "
               f"{N}{WH}{len(s.store['docs'])}{N}{D} doc chunks from previous sessions{N}\n")
+    if web_url:
+        print(f"  {PK}◆{N} {D}web UI live (shares this brain):{N} {CY}{web_url}{N}\n")
     print(FEATURES)
     while True:
         try:
@@ -649,7 +668,8 @@ def run() -> int:
             print(f"\n{D}link severed.{N}")
             return 0
         try:
-            out = s.render(line)
+            with s._lock:                       # don't clash with the web UI mid-call
+                out = s.render(line)
         except SystemExit:
             print(f"{PU}◢ jacking out… session closed.{N}")
             return 0

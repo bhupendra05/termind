@@ -92,3 +92,31 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a dark terminal card labeled **"termind · MODEL BAY"** showing a vertical rack of swappable glowing "brain cartridges": **gemma3 ★ active**, **qwen2.5**, **llama3.2**, **deepseek-r1**, each a rounded chip with a neon edge; a hand-cursor slots a new cartridge in. A small tag reads "switch in one command · choice remembered." Top headline in bold charcoal: **"Bring your own brain."** Subtitle: "termind v0.3 · any Ollama model · warm-in-RAM · private · $0/query." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.4 — Terminal + Web, one brain
+
+### 📣 Post
+
+> **termind v0.4: I type one word — `termind` — and a local AI agent opens in BOTH my terminal and my browser. Same brain. Zero cloud.**
+>
+> The terminal version was already a full agent (memory, RAG, builds projects, opens VS Code). Now it also launches a **local, Claude-style web chat** — auto-opens in your browser, neon dark UI, message bubbles, a model picker, and every command works.
+>
+> The part I love: **they share one mind.** `/remember` something in the terminal, ask "who am I?" in the web tab — it knows. Switch models in the web dropdown, the terminal uses it too. One persistent memory, two surfaces.
+>
+> 🖥️ Terminal REPL + 🌐 web UI from a single `termind`
+> 🔄 Model picker (any Ollama model) in the browser
+> 🧠 Shared memory, model, and history across both
+> 🔒 Pure stdlib server, **localhost only** — nothing leaves the machine
+> 💸 Private · $0/query · sandboxed on AION · 42 tests
+>
+> `termind` (both) · `termind --web` (browser only) · `termind --no-web` (terminal only)
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #Ollama #AgenticAI #OpenSource #Python #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a single glowing command **`$ termind`** with a neon split forking into TWO panels — left a dark cyberpunk **terminal** (ASCII ▲ TERMIND banner, prompt line), right a **browser window** showing a Claude-style chat with message bubbles and a model dropdown. A bright violet **"shared brain"** chip with a neural icon sits on the line connecting them, labeled "one memory · one model." Top headline in bold charcoal: **"One command. Terminal + web. Same local brain."** Subtitle: "termind v0.4 · local Gemma/Ollama · private · $0/query · localhost only." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

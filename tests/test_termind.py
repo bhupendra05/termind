@@ -314,3 +314,34 @@ def test_context_is_capped_for_speed():
 def test_preferences_enforced_in_system_prompt():
     s = _session()
     assert "preferences" in s.chat_messages("hi")[0]["content"].lower()
+
+
+def test_web_strip_ansi():
+    from termind.web import _strip_ansi
+    assert _strip_ansi("\033[36mhi\033[0m there") == "hi there"
+
+
+def test_handle_web_chat_returns_plain_text():
+    s = _session()
+    out = s.handle_web("hello")
+    assert isinstance(out, str) and "\033[" not in out      # web text has no panels/ansi from chat
+
+
+def test_web_server_state_and_send(monkeypatch):
+    import json, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    monkeypatch.setattr(r, "model_available", lambda n=None: True)
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "hello from the model")
+    s = r.Session(live=True)
+    httpd, url = serve(s, port=8799, open_browser=False)
+    import threading
+    threading.Thread(target=httpd.handle_request, daemon=True).start()  # state
+    st = json.loads(urllib.request.urlopen(url + "/api/state", timeout=3).read())
+    assert "model" in st and "live" in st and "version" in st
+    threading.Thread(target=httpd.handle_request, daemon=True).start()  # send
+    req = urllib.request.Request(url + "/api/send", data=json.dumps({"text": "hi"}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    rep = json.loads(urllib.request.urlopen(req, timeout=5).read())
+    assert "hello from the model" in rep["reply"]
+    httpd.server_close()
