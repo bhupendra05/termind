@@ -150,3 +150,24 @@ def test_do_executes_only_on_yes(monkeypatch):
     s = r.Session(live=True)
     assert "termind-ok" in s.do_action("say ok", confirm=lambda _: "y")     # ran with consent
     assert "aborted" in s.do_action("say ok", confirm=lambda _: "n")        # refused without
+
+
+def test_bare_exit_actually_quits():
+    import pytest as _pt
+    for w in ("exit", "quit", "bye", "EXIT", "exit."):
+        with _pt.raises(SystemExit):
+            _session().handle(w)
+
+
+def test_questions_are_not_auto_remembered():
+    s = _session()
+    s.handle("which model should i use for coding?")     # a question, not a self-fact
+    s.handle("can i build this with python?")
+    assert s.store["facts"] == []
+
+
+def test_system_prompt_separates_agent_from_user():
+    s = _session()
+    s.handle("/remember my name is Bhupendra")
+    sys_msg = s.chat_messages("who am i?")[0]["content"]
+    assert "USER" in sys_msg and "Never confuse yourself" in sys_msg

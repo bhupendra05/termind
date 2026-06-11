@@ -21,9 +21,10 @@ from .llm import (MODEL, chat, claude_chat, embed, model_available, offline_chat
                   ollama_available, parse_action)
 from .store import load as store_load, save as store_save
 
-# Auto-memory: sentences where the user states something about themselves get remembered.
+# Auto-memory: only when a SENTENCE STARTS with a self-statement — "should i use X?" must
+# not become a remembered "fact".
 AUTO_FACT = re.compile(
-    r"\b(i am|i'm|my name is|i work|i live|i like|i prefer|i use|i build|call me)\b", re.I)
+    r"(?:^|[.!?]\s+)(i am|i'm|my name is|i work|i live|i like|i prefer|i build|call me)\b", re.I)
 
 # ── neon palette (256-color ANSI) ────────────────────────────────────────────
 CY = "\033[38;5;51m"     # electric cyan
@@ -241,10 +242,14 @@ class Session:
 
     def chat_messages(self, text: str) -> list:
         """System prompt carries the remembered facts — the model knows who it's talking to."""
-        sys = ("You are termind, the user's private local agent running in their terminal. "
+        sys = ("You are termind, a private local AI agent running in the user's terminal. "
+               "The HUMAN typing to you is your user — a separate person, not you. "
                "Be concise and direct.")
         if self.store["facts"]:
-            sys += " Known facts about your user: " + "; ".join(self.store["facts"])
+            sys += (" Facts the USER has told you about THEMSELVES (when they ask 'who am I' "
+                    "or about their identity, answer from these): "
+                    + "; ".join(self.store["facts"])
+                    + ". Never confuse yourself (termind, the agent) with the user.")
         return [{"role": "system", "content": sys}] + self.history + [
             {"role": "user", "content": text}]
 
@@ -277,7 +282,8 @@ class Session:
         line = line.strip()
         if not line:
             return ""
-        if line in ("/exit", "/quit"):
+        # bare "exit"/"quit"/"bye" must actually quit — never let the model fake an exit
+        if line.lower().rstrip("!. ") in ("/exit", "/quit", "exit", "quit", "bye", "q"):
             raise SystemExit(0)
         if line == "/help":
             return FEATURES
