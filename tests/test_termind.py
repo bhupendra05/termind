@@ -86,7 +86,7 @@ def test_index_folder_skips_binaries(tmp_path):
 def test_server_up_but_no_model_is_not_live(monkeypatch):
     import termind.repl as r
     monkeypatch.setattr(r, "ollama_available", lambda: True)
-    monkeypatch.setattr(r, "model_available", lambda: False)
+    monkeypatch.setattr(r, "model_available", lambda n=None: False)
     s = r.Session()
     assert s.server is True and s.live is False        # must NOT pretend to be online
     assert "model missing" in s.do_status()
@@ -95,7 +95,7 @@ def test_server_up_but_no_model_is_not_live(monkeypatch):
 def test_server_and_model_present_is_live(monkeypatch):
     import termind.repl as r
     monkeypatch.setattr(r, "ollama_available", lambda: True)
-    monkeypatch.setattr(r, "model_available", lambda: True)
+    monkeypatch.setattr(r, "model_available", lambda n=None: True)
     assert r.Session().live is True
 
 
@@ -279,3 +279,38 @@ def test_thinking_spinner_is_safe_without_tty(capsys):
     with Thinking("test"):
         pass                                            # piped: must not animate or crash
     assert capsys.readouterr().out == ""                # zero garbage when not a TTY
+
+
+def test_model_switch_persists(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "model_available", lambda n=None: True)
+    s = _session()
+    out = s.handle("/model qwen2.5")
+    assert "switched to qwen2.5" in out
+    s2 = _session()
+    assert s2.model == "qwen2.5"                       # choice survives restarts
+
+
+def test_model_not_pulled_suggests_pull(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "model_available", lambda n=None: False)
+    assert "/pull ghostmodel" in _session().handle("/model ghostmodel")
+
+
+def test_model_list_shows_installed(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "list_models", lambda: ["gemma3:latest", "llama3.2:latest"])
+    out = _session().handle("/model")
+    assert "gemma3:latest" in out and "llama3.2:latest" in out and "active:" in out
+
+
+def test_context_is_capped_for_speed():
+    s = _session()
+    s.history = [{"role": "user", "content": f"m{i}"} for i in range(30)]
+    msgs = s.chat_messages("latest")
+    assert len(msgs) <= 10                              # system + last 8 + new message
+
+
+def test_preferences_enforced_in_system_prompt():
+    s = _session()
+    assert "preferences" in s.chat_messages("hi")[0]["content"].lower()

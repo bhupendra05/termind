@@ -17,15 +17,19 @@ def ollama_available() -> bool:
         return False
 
 
-def model_available() -> bool:
-    """True only if the configured MODEL is actually pulled on the server."""
+def list_models() -> list:
+    """Names of all models pulled on the local Ollama server."""
     try:
         with urllib.request.urlopen(HOST + "/api/tags", timeout=2) as r:  # noqa: S310
-            models = json.loads(r.read()).get("models", [])
-        base = MODEL.split(":")[0]
-        return any(str(m.get("name", "")).split(":")[0] == base for m in models)
+            return [str(m.get("name", "")) for m in json.loads(r.read()).get("models", [])]
     except Exception:
-        return False
+        return []
+
+
+def model_available(name: str = None) -> bool:
+    """True only if the given (or configured) model is actually pulled on the server."""
+    base = (name or MODEL).split(":")[0]
+    return any(m.split(":")[0] == base for m in list_models())
 
 
 def embed(texts: list) -> list:
@@ -57,7 +61,9 @@ def claude_chat(messages: list) -> str:
 
 
 def chat(messages: list, fmt_json: bool = False, model: str = None) -> str:
-    payload = {"model": model or MODEL, "messages": messages, "stream": False}
+    # keep_alive keeps the model warm in RAM between calls → much faster follow-ups
+    payload = {"model": model or MODEL, "messages": messages, "stream": False,
+               "keep_alive": "15m"}
     if fmt_json:
         payload["format"] = "json"
     req = urllib.request.Request(HOST + "/api/chat", data=json.dumps(payload).encode(),

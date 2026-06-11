@@ -69,3 +69,26 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, soft off-white (#F7F7FB) background with a faint violet dot-grid. Left: a dark neon terminal window labeled **"termind"** with one glowing typed sentence: **"create a new project: an expense tracker"**. From it, a violet pipeline of five connected step-chips flows right: **"plan" → "folder + code" → "ARCHITECTURE.md" → "VS Code opens" → "▶ runs"**, each with a green check. Above the pipeline, three small badges: **"remembers you 🧠" · "self-heals code 🩹" · "y/N consent 🛡️"**. Top headline in bold charcoal sans-serif: **"Talk to your terminal. It builds, documents, opens VS Code — and runs it."** Subtitle in grey: "termind v0.2 · local Gemma · private · $0/query · sandboxed on AION." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector style, generous white space, rounded corners, soft shadows, premium developer-tool aesthetic, high detail.
+
+---
+
+## v0.3 — Bring your own brain
+
+### 📣 Post
+
+> **termind v0.3 — your terminal agent is no longer married to one model.**
+>
+> 🔄 **/model** — list every model on your machine and switch brains in one command: Gemma for chat, Qwen for code, DeepSeek R1 for reasoning. Your choice is remembered across sessions.
+> ⬇️ **/pull llama3.2** — download any Ollama model without leaving the agent.
+> ⚡ **Faster** — the model now stays warm in RAM between calls (no reload lag), and context is trimmed to recent turns for snappier local inference.
+> 🧠 **More personal** — preferences like "I prefer short answers" are now enforced in every reply, not just remembered.
+>
+> Same guarantees: private, $0/query, sandboxed + budgeted on AION, 39 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #Ollama #Gemma #Qwen #AgenticAI #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a dark terminal card labeled **"termind · MODEL BAY"** showing a vertical rack of swappable glowing "brain cartridges": **gemma3 ★ active**, **qwen2.5**, **llama3.2**, **deepseek-r1**, each a rounded chip with a neon edge; a hand-cursor slots a new cartridge in. A small tag reads "switch in one command · choice remembered." Top headline in bold charcoal: **"Bring your own brain."** Subtitle: "termind v0.3 · any Ollama model · warm-in-RAM · private · $0/query." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

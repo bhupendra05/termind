@@ -18,7 +18,7 @@ termind                          # ← a local agent, in any terminal
 
 ```
   ▀█▀ █▀▀ █▀█ █▀▄▀█ █ █▄░█ █▀▄
-  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v0.2.0 · local agent · on AION
+  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v0.3.0 · local agent · on AION
 
 ┌─ FEATURES ─────────────────────────────────────────────────┐
 │  just type        chat with your local model (gemma3)

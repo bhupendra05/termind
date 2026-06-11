@@ -20,8 +20,8 @@ from aion import Capabilities, Kernel
 
 from . import __version__
 from .indexer import index_folder
-from .llm import (MODEL, chat, claude_chat, embed, model_available, offline_chat,
-                  ollama_available, parse_action)
+from .llm import (MODEL, chat, claude_chat, embed, list_models, model_available,
+                  offline_chat, ollama_available, parse_action)
 from .store import load as store_load, save as store_save
 
 # Auto-memory: only when a SENTENCE STARTS with a self-statement — "should i use X?" must
@@ -77,6 +77,8 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/write <file> <spec>{N} {D}» generate one file (preview + y/N){N}
 {CY}║{N}  {GR}◉{N} {WH}/mkdir <path>{N}  {D}» create folder{N}   {GR}◉{N} {WH}/code <path>{N}  {D}» open VS Code{N}
 {CY}║{N}  {PK}◆{N} {WH}or just say it{N}  {D}» "create a folder x" · "build a tool that…"{N}
+{CY}║{N}  {GR}◉{N} {WH}/model [name]{N}    {D}»{N} list · switch your brain (any Ollama model)
+{CY}║{N}  {GR}◉{N} {WH}/pull <name>{N}     {D}»{N} download a new model (llama3.2, qwen2.5…)
 {CY}║{N}  {GR}◉{N} {WH}/remember <fact>{N} {D}»{N} teach it about you · survives restarts
 {CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} embedding search over all memories
 {CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
@@ -177,9 +179,11 @@ class Session:
     def __init__(self, kernel: Kernel = None, live: bool = None):
         self.k = kernel or Kernel()
         self.server = ollama_available() if live is None else live
+        # the active model is the user's choice (persisted) — env default otherwise
+        self.model = store_load().get("model") or MODEL
         # "live" requires the server AND the model — a running server with no model pulled
         # must not pretend to be online (it would 404 on the first chat).
-        self.live = (self.server and model_available()) if live is None else live
+        self.live = (self.server and model_available(self.model)) if live is None else live
         self.history = []
         self.chunks = 0
         self.spent = 0.0
@@ -256,7 +260,7 @@ class Session:
                 except Exception:
                     pass  # cloud unreachable → next rung
             if self.live:
-                return chat(self.chat_messages(
+                return self._chat(self.chat_messages(
                     "This is a HARD question. Reason step by step, check yourself, "
                     "then give the answer:\n" + q))
             return offline_chat(self.chat_messages(q))
@@ -293,14 +297,14 @@ class Session:
         sys_p = ("You write complete, working file contents. Reply ONLY with the raw file "
                  "content — no markdown fences, no commentary.")
         with Thinking(f"writing {os.path.basename(file)}"):
-            content = self._strip_fences(chat([
+            content = self._strip_fences(self._chat([
                 {"role": "system", "content": sys_p},
                 {"role": "user", "content": f"Write the file {file}. It should: {spec}"}]))
             for _ in range(2):
                 err = self._py_error(file, content)
                 if not err:
                     break
-                content = self._strip_fences(chat([
+                content = self._strip_fences(self._chat([
                     {"role": "system", "content": sys_p},
                     {"role": "user", "content":
                      f"This {file} has a syntax error ({err}). Reply with the FULL corrected "
@@ -362,7 +366,7 @@ class Session:
         if not self.live:
             return "project building needs a live model — install Ollama (./setup.sh)"
         with Thinking("planning your project"):
-            plan = parse_action(chat([
+            plan = parse_action(self._chat([
                 {"role": "system", "content":
                  'Scaffold a SMALL working starter project (2-5 short files). Reply with EXACTLY '
                  '{"folder": "<kebab-name>", "files": {"<relative path>": "<full file content>"}, '
@@ -423,7 +427,7 @@ class Session:
         if not self.live:
             return self.do_chat(text)  # can't plan actions without a model
         with Thinking("parsing your intent"):
-            act = parse_action(chat([{"role": "system", "content": INTENT_SYS},
+            act = parse_action(self._chat([{"role": "system", "content": INTENT_SYS},
                                      {"role": "user", "content": text}], fmt_json=True))
         intent = act.get("intent", "chat")
         if intent == "mkdir" and act.get("path"):
@@ -445,7 +449,7 @@ class Session:
         if not self.live:
             return "operator mode needs a live model — install Ollama (./setup.sh)"
         with Thinking("proposing a command"):
-            act = parse_action(chat([
+            act = parse_action(self._chat([
                 {"role": "system", "content":
                  'Propose ONE safe macOS shell command for the task. Reply with EXACTLY '
                  '{"cmd": "<command>", "why": "<one line>"}. Never propose destructive commands.'},
@@ -469,7 +473,7 @@ class Session:
             return "command timed out (60s cap)."
 
     def do_ask(self, q: str) -> str:
-        think = (lambda m: chat(m, fmt_json=True)) if self.live else offline_ask_think
+        think = (lambda m: self._chat(m, fmt_json=True)) if self.live else offline_ask_think
         pid = self.k.spawn("termind-ask", fn=_ask_agent, args=(q, think),
                            caps=Capabilities(["mem.search", "mem.get"]), budget=5.0)
         with Thinking("querying your data"):
@@ -479,23 +483,53 @@ class Session:
         self.denied = self.k.meter.denied
         return p.result if p.state.value == "done" else f"(error: {p.error})"
 
+    def _chat(self, msgs: list, fmt_json: bool = False, model: str = None) -> str:
+        """All model calls go through here so the user's chosen /model applies everywhere."""
+        return chat(msgs, fmt_json=fmt_json, model=model or self.model)
+
     def chat_messages(self, text: str) -> list:
         """System prompt carries the remembered facts — the model knows who it's talking to."""
         sys = ("You are termind, a private local AI agent running in the user's terminal. "
                "The HUMAN typing to you is your user — a separate person, not you. "
-               "Be concise and direct.")
+               "Be concise and direct. ALWAYS honor the user's stated preferences "
+               "(answer length, tone, style) in every reply.")
         if self.store["facts"]:
             sys += (" Facts the USER has told you about THEMSELVES (when they ask 'who am I' "
                     "or about their identity, answer from these): "
                     + "; ".join(self.store["facts"])
                     + ". Never confuse yourself (termind, the agent) with the user.")
-        return [{"role": "system", "content": sys}] + self.history + [
+        # send only the recent turns — smaller context = faster local inference
+        return [{"role": "system", "content": sys}] + self.history[-8:] + [
             {"role": "user", "content": text}]
+
+    def do_model(self, name: str = "") -> str:
+        if not name:
+            installed = list_models()
+            rows = [("★ " if m.split(":")[0] == self.model.split(":")[0] else "  ") + m
+                    for m in installed] or ["  (none pulled yet — try: /pull gemma3)"]
+            return ("active: " + self.model + "\n" + "\n".join(rows)
+                    + "\nswitch: /model <name> · download: /pull <name>")
+        if not model_available(name):
+            return f"'{name}' isn't pulled yet — run: /pull {name}"
+        self.model = name
+        self.store["model"] = name
+        store_save(self.store)
+        self.live = self.server and True
+        return f"switched to {name} (saved — future sessions use it too)"
+
+    def do_pull(self, name: str) -> str:
+        if not shutil.which("ollama"):
+            return "ollama isn't installed — run ./setup.sh first"
+        print(f"  {D}downloading {name} — Ollama will show progress…{N}")
+        r = subprocess.run(["ollama", "pull", name], timeout=3600)
+        if r.returncode != 0:
+            return f"pull failed — check the model name ({name})"
+        return f"{name} ready · switch to it:  /model {name}"
 
     def do_chat(self, text: str) -> str:
         msgs = self.chat_messages(text)
         with Thinking("neural core thinking"):
-            reply = chat(msgs) if self.live else offline_chat(msgs)
+            reply = self._chat(msgs) if self.live else offline_chat(msgs)
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": reply}]
         self.store["history"] = self.history[-20:]   # conversation survives restarts
@@ -508,9 +542,9 @@ class Session:
 
     def do_status(self) -> str:
         if self.live:
-            brain = f"{MODEL} (live, local)"
+            brain = f"{self.model} (live, local)"
         elif getattr(self, "server", False):
-            brain = f"server up, model missing (run: ollama pull {MODEL})"
+            brain = f"server up, model missing (run: /pull {self.model})"
         else:
             brain = "offline brain (run ./setup.sh)"
         return (f"brain: {brain} · facts remembered: {len(self.store['facts'])} · "
@@ -544,6 +578,11 @@ class Session:
         if line.startswith("/think"):
             q = line[6:].strip()
             return self.do_think(q) if q else "usage: /think <hard question>"
+        if line.startswith("/model"):
+            return self.do_model(line[6:].strip())
+        if line.startswith("/pull"):
+            n = line[5:].strip()
+            return self.do_pull(n) if n else "usage: /pull <model name>  e.g. /pull llama3.2"
         if line.startswith("/do"):
             t = line[3:].strip()
             return self.do_action(t) if t else "usage: /do <task in plain english>"
@@ -584,6 +623,8 @@ class Session:
             return _panel("MEMORY RECALL", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith("/think"):
             return _panel("DEEP THOUGHT", out.replace("\n", f"\n{CY}│{N} "), CY)
+        if s.startswith(("/model", "/pull")):
+            return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith("/do"):
             return _panel("OPERATOR", out.replace("\n", f"\n{YL}│{N} "), YL)
         if s.startswith(("/build", "/write", "/mkdir", "/code")):
