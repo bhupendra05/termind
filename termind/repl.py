@@ -56,6 +56,9 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/ask <question>{N}  {D}»{N} query YOUR data · answers cite sources
 {CY}║{N}  {GR}◉{N} {WH}/think <hard q>{N}  {D}»{N} escalate: big model › cloud › deep local
 {CY}║{N}  {GR}◉{N} {WH}/do <task>{N}       {D}»{N} proposes a shell command · runs on YOUR y/N
+{CY}║{N}  {GR}◉{N} {WH}/build <idea>{N}    {D}»{N} scaffold a project · write code · open VS Code
+{CY}║{N}  {GR}◉{N} {WH}/write <file> <spec>{N} {D}» generate one file (preview + y/N){N}
+{CY}║{N}  {GR}◉{N} {WH}/mkdir <path>{N}  {D}» create folder{N}   {GR}◉{N} {WH}/code <path>{N}  {D}» open VS Code{N}
 {CY}║{N}  {GR}◉{N} {WH}/remember <fact>{N} {D}»{N} teach it about you · survives restarts
 {CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} embedding search over all memories
 {CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
@@ -206,6 +209,79 @@ class Session:
                 "then give the answer:\n" + q))
         return offline_chat(self.chat_messages(q))
 
+    # ── builder powers: folders, code files, whole projects, VS Code ─────────
+    @staticmethod
+    def _strip_fences(t: str) -> str:
+        t = t.strip()
+        if t.startswith("```"):
+            t = t.split("\n", 1)[1] if "\n" in t else ""
+            if t.rstrip().endswith("```"):
+                t = t.rstrip()[:-3]
+        return t.strip() + "\n"
+
+    def do_mkdir(self, path: str) -> str:
+        full = os.path.expanduser(path)
+        os.makedirs(full, exist_ok=True)
+        self.actions += 1
+        return f"created folder: {full}"
+
+    def do_code(self, path: str) -> str:
+        full = os.path.expanduser(path or ".")
+        for cmd in (["code", full], ["open", "-a", "Visual Studio Code", full]):
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, timeout=20)
+                self.actions += 1
+                return f"opened in VS Code: {full}"
+            except Exception:
+                continue
+        return "couldn't launch VS Code — install it (or its 'code' CLI) first"
+
+    def do_write(self, file: str, spec: str, confirm=None) -> str:
+        if not self.live:
+            return "code generation needs a live model — install Ollama (./setup.sh)"
+        content = self._strip_fences(chat([
+            {"role": "system", "content":
+             "You write complete, working file contents. Reply ONLY with the raw file "
+             "content — no markdown fences, no commentary."},
+            {"role": "user", "content": f"Write the file {file}. It should: {spec}"}]))
+        preview = "\n".join(content.splitlines()[:15])
+        print(f"\n  {YL}⚡ will write {WH}{file}{N} {D}({len(content.splitlines())} lines){N}\n"
+              f"{D}{preview}{N}\n")
+        if str((confirm or input)(f"  {PK}write it? [y/N]{N} ")).strip().lower() != "y":
+            return "aborted — nothing was written."
+        full = os.path.expanduser(file)
+        os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(content)
+        self.actions += 1
+        return f"wrote {full} ({len(content.splitlines())} lines) — open it:  /code {file}"
+
+    def do_build(self, idea: str, confirm=None, open_editor: bool = True) -> str:
+        if not self.live:
+            return "project building needs a live model — install Ollama (./setup.sh)"
+        plan = parse_action(chat([
+            {"role": "system", "content":
+             'Scaffold a SMALL starter project (2-4 short files). Reply with EXACTLY '
+             '{"folder": "<kebab-name>", "files": {"<relative path>": "<full file content>"}}. '
+             "Include a README.md. Keep files short and working."},
+            {"role": "user", "content": idea}], fmt_json=True))
+        folder, files = plan.get("folder"), plan.get("files") or {}
+        if not folder or not files:
+            return "couldn't plan that project — try rephrasing."
+        print(f"\n  {YL}⚡ will create {WH}{folder}/{N} {D}with {len(files)} files:{N} "
+              + ", ".join(files) + "\n")
+        if str((confirm or input)(f"  {PK}build it? [y/N]{N} ")).strip().lower() != "y":
+            return "aborted — nothing was created."
+        root = os.path.expanduser(folder)
+        for rel, content in files.items():
+            full = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(full) or root, exist_ok=True)
+            with open(full, "w", encoding="utf-8") as f:
+                f.write(self._strip_fences(str(content)))
+        self.actions += 1
+        opened = f" · {self.do_code(root)}" if open_editor else ""
+        return f"built {root}/ with {len(files)} files{opened}"
+
     def do_action(self, task: str, confirm=None) -> str:
         """Operator mode: the model proposes ONE shell command; runs only on your explicit y."""
         if not self.live:
@@ -307,6 +383,19 @@ class Session:
         if line.startswith("/do"):
             t = line[3:].strip()
             return self.do_action(t) if t else "usage: /do <task in plain english>"
+        if line.startswith("/mkdir"):
+            p = line[6:].strip()
+            return self.do_mkdir(p) if p else "usage: /mkdir <path>"
+        if line.startswith("/code"):
+            return self.do_code(line[5:].strip())
+        if line.startswith("/write"):
+            parts = line[6:].strip().split(None, 1)
+            if len(parts) < 2:
+                return "usage: /write <file> <what it should do>"
+            return self.do_write(parts[0], parts[1])
+        if line.startswith("/build"):
+            i = line[6:].strip()
+            return self.do_build(i) if i else "usage: /build <project idea>"
         if line.startswith("/"):
             return f"unknown command {line.split()[0]} — try /help"
         return self.do_chat(line)
@@ -333,6 +422,8 @@ class Session:
             return _panel("DEEP THOUGHT", out.replace("\n", f"\n{CY}│{N} "), CY)
         if s.startswith("/do"):
             return _panel("OPERATOR", out.replace("\n", f"\n{YL}│{N} "), YL)
+        if s.startswith(("/build", "/write", "/mkdir", "/code")):
+            return _panel("BUILDER", out.replace("\n", f"\n{GR}│{N} "), GR)
         if s.startswith("/"):
             return f"{YL}{out}{N}"
         return _panel("NEURAL CORE", out, PK)

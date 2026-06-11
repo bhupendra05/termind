@@ -171,3 +171,37 @@ def test_system_prompt_separates_agent_from_user():
     s.handle("/remember my name is Bhupendra")
     sys_msg = s.chat_messages("who am i?")[0]["content"]
     assert "USER" in sys_msg and "Never confuse yourself" in sys_msg
+
+
+def test_mkdir_creates_folder(tmp_path):
+    s = _session()
+    out = s.do_mkdir(str(tmp_path / "new" / "nested"))
+    assert "created folder" in out and (tmp_path / "new" / "nested").is_dir()
+
+
+def test_write_generates_file_with_consent(tmp_path, monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "```python\nprint('hi')\n```")
+    s = r.Session(live=True)
+    f = str(tmp_path / "hello.py")
+    out = s.do_write(f, "print hi", confirm=lambda _: "y")
+    assert "wrote" in out and open(f).read() == "print('hi')\n"   # fences stripped
+    assert "aborted" in s.do_write(f, "print hi", confirm=lambda _: "n")
+
+
+def test_build_scaffolds_project(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    plan = _json.dumps({"folder": str(tmp_path / "demo-app"),
+                        "files": {"README.md": "# demo", "main.py": "print('go')"}})
+    monkeypatch.setattr(r, "chat", lambda *a, **k: plan)
+    s = r.Session(live=True)
+    out = s.do_build("a demo app", confirm=lambda _: "y", open_editor=False)
+    assert "built" in out
+    assert (tmp_path / "demo-app" / "main.py").read_text().strip() == "print('go')"
+
+
+def test_write_and_build_need_live_model():
+    s = _session()
+    assert "needs a live model" in s.do_write("x.py", "anything")
+    assert "needs a live model" in s.do_build("anything")
