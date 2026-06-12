@@ -291,3 +291,27 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind Models panel with a highlighted **"bring YOUR OWN model"** section: an input field containing `~/models/my-finetune.gguf`, an "＋ add" button mid-click, and three small labeled lanes flowing into the model bay rack: 🧬 "your .gguf fine-tune", 🤗 "hf.co/you/your-model", 🌐 "remote OLLAMA_HOST". The rack below shows the custom model slotting in beside gemma3 with a "✓ active" tag. Top headline in bold charcoal: **"Your fine-tune deserves a first-class seat."** Subtitle: "termind v0.11 · import any GGUF · Hugging Face direct · remote servers · private · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.12 — Profiles, Settings, Themes & a built-in Support Bot
+
+### 📣 Post
+
+> **termind v0.12 — my local agent now greets you by name, wears three outfits, imports your memories from other AIs, and answers its own support questions.**
+>
+> 👤 **Welcome page + profile** — first launch asks who you are and how you like answers; every reply is tuned to YOUR profile from then on. Local profile, not an account — nothing to sign up for, nothing leaves the machine.
+> 🎨 **Themes** — dark (Claude-grey), light, or full cyberpunk. One click, remembered.
+> 🧠 **Memory portability** — paste memories exported from ChatGPT/Claude into Settings → termind knows you instantly. Export yours back out, or wipe everything with one button.
+> 📖 **Built-in handbook** — workflows, the custom-model criteria (GGUF rules!), and honest limitations, readable in Settings or via /guide.
+> 🤖 **Support bot** — ask "how do I import my own model?" or "what are your limitations?" and it answers FROM its own documentation — grounded, no hallucinated features. Works even with no model installed.
+>
+> The agent that explains itself, adapts to you, and keeps your memory portable. Local. Private. $0. 85 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #Ollama #AgenticAI #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: three mini termind windows fanned like cards showing the SAME chat in three themes — warm-grey, light, and neon cyberpunk. In front, a welcome card: "▲ welcome to termind — what should I call you?" with a name field reading "XYZ". To the right, a Settings column with small labeled rows: "profile", "theme", "memory: ⬆ import from ChatGPT/Claude", "help & workflows". A chat bubble asks "what are your limitations?" with a grounded answer beneath. Top headline in bold charcoal: **"A local agent with a you-shaped memory."** Subtitle: "termind v0.12 · profiles · themes · memory import · built-in support bot · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

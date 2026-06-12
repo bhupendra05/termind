@@ -841,3 +841,66 @@ def test_web_import_endpoint(monkeypatch):
     d = json.loads(urllib.request.urlopen(req, timeout=3).read())
     assert d["reply"] == "ADDED:hf.co/xyz/their-model"
     httpd.server_close()
+
+
+def test_profile_set_persists_and_feeds_prompt():
+    s = _session()
+    s.set_profile(name="XYZ", role="ml engineer", prefs="short answers", theme="cyber")
+    s2 = _session()                                       # restart
+    p = s2.profile()
+    assert p["name"] == "XYZ" and p["theme"] == "cyber" and p["onboarded"]
+    sysmsg = s2.chat_messages("hi")[0]["content"]
+    assert "XYZ" in sysmsg and "short answers" in sysmsg
+
+
+def test_onboarding_flag_when_no_name():
+    assert _session().profile()["onboarded"] is False
+
+
+def test_import_memories_dedupes_and_persists():
+    s = _session()
+    out = s.import_memories("- I love chai\n\n* I love chai\nworks at Acme Corp\nx")
+    assert "imported 2" in out                            # dupe + too-short skipped
+    s2 = _session()
+    assert "I love chai" in s2.export_memories() and "Acme Corp" in s2.export_memories()
+
+
+def test_clear_memory_kinds():
+    s = _session()
+    s.handle("/remember test fact about me")
+    s.handle("hello there")
+    assert s.clear_memory("facts") == "cleared facts" and s.store["facts"] == []
+    s.clear_memory("chats")
+    assert s.chats_list() == [] and s.history == []
+
+
+def test_helpbot_answers_offline_with_gguf_criteria():
+    s = _session()
+    out = s.handle("how do i import my own model into termind?")
+    assert "GGUF" in out                                  # support bot, grounded, offline
+
+
+def test_helpbot_limitations_topic():
+    out = _session().handle("what are your limitations?")
+    assert "generative fill" in out or "Honest limits" in out
+
+
+def test_web_profile_and_memory_endpoints():
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    s = r.Session(live=False)
+    httpd, url = serve(s, port=8811, open_browser=False)
+    def post(path, body):
+        threading.Thread(target=httpd.handle_request, daemon=True).start()
+        req = urllib.request.Request(url + path, data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=3).read())
+    p = post("/api/profile", {"name": "XYZ", "theme": "light"})
+    assert p["name"] == "XYZ" and p["theme"] == "light" and p["onboarded"]
+    m = post("/api/memory", {"op": "import", "text": "likes momos\nbuilds agents"})
+    assert m["facts"] == 2
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    h = json.loads(urllib.request.urlopen(url + "/api/help", timeout=3).read())
+    assert "custom model criteria" in h["topics"]
+    httpd.server_close()

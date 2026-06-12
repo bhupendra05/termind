@@ -53,6 +53,11 @@ class _Handler(BaseHTTPRequestHandler):
             }))
         if self.path == "/api/catalog":
             return self._send(200, json.dumps(self.session.model_catalog()))
+        if self.path == "/api/profile":
+            return self._send(200, json.dumps(self.session.profile()))
+        if self.path == "/api/help":
+            from .helpdocs import TOPICS
+            return self._send(200, json.dumps({"topics": TOPICS}))
         return self._send(404, "not found", "text/plain")
 
     def do_POST(self):
@@ -101,6 +106,24 @@ class _Handler(BaseHTTPRequestHandler):
                                          (req.get("name") or None))
             return self._send(200, json.dumps({"reply": out,
                                                "pull": dict(self.session.pull)}))
+        if self.path == "/api/profile":
+            return self._send(200, json.dumps(self.session.set_profile(
+                name=req.get("name"), role=req.get("role"),
+                prefs=req.get("prefs"), theme=req.get("theme"))))
+        if self.path == "/api/memory":
+            s = self.session
+            op = req.get("op")
+            with s._lock:
+                if op == "import":
+                    out = s.import_memories(str(req.get("text", "")))
+                elif op == "export":
+                    out = s.export_memories()
+                elif op == "clear":
+                    out = s.clear_memory(str(req.get("what", "")))
+                else:
+                    out = "unknown op"
+            return self._send(200, json.dumps({"reply": out,
+                                               "facts": len(s.store["facts"])}))
         if self.path == "/api/model":
             name = (req.get("model") or "").strip()
             with self.session._lock:
@@ -124,6 +147,10 @@ PAGE = r"""<!doctype html><html lang=en><head><meta charset=utf-8>
 <style>
 :root{--bg:#262624;--side:#1f1e1d;--card:#30302e;--bubble:#393937;--line:#3d3c39;
 --ink:#ececec;--dim:#9b9a96;--clay:#d97757;--clay2:#c4633f;--green:#7bbf7e}
+[data-theme=light]{--bg:#f5f4ef;--side:#ebe9e2;--card:#ffffff;--bubble:#e4e2da;--line:#d6d3c8;
+--ink:#2a2a26;--dim:#8a887e;--clay:#c45f3c;--clay2:#a94e2f;--green:#4d9a55}
+[data-theme=cyber]{--bg:#05010f;--side:#0d0221;--card:#160a2b;--bubble:#241047;--line:#3a1f63;
+--ink:#e7e9ff;--dim:#7b7da6;--clay:#05d9e8;--clay2:#ff2a6d;--green:#3ef58b}
 *{box-sizing:border-box}
 body{margin:0;font-family:ui-sans-serif,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;
 background:var(--bg);color:var(--ink);height:100vh;display:flex;overflow:hidden}
@@ -161,6 +188,15 @@ border:1px solid transparent}
 .mbtn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;
 padding:6px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;flex:none}
 .mbtn:hover{border-color:var(--clay)}.mbtn.active{border-color:var(--green);color:var(--green)}
+.sin{width:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;
+padding:9px 11px;color:var(--ink);font-family:inherit;font-size:13px;outline:none;
+margin:4px 0;resize:vertical}
+.sin:focus{border-color:var(--clay)}
+.tbtn.on{border-color:var(--clay);color:var(--clay)}
+.htop{padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin:4px 0;
+cursor:pointer;font-size:13px}
+.htop .hb{display:none;color:var(--dim);font-size:12.5px;white-space:pre-wrap;margin-top:6px}
+.htop.open .hb{display:block}
 #mspec{flex:1;background:var(--card);border:1px solid var(--line);border-radius:8px;
 padding:8px 10px;color:var(--ink);font-family:inherit;font-size:12.5px;outline:none}
 #mspec:focus{border-color:var(--clay)}
@@ -226,9 +262,54 @@ button.send:hover{background:var(--clay2)}button.send:disabled{opacity:.4;cursor
   <span id=core><span class="dot off"></span>…</span>
   <select id=model title="quick switch"></select>
   <button class=mbtn id=mopen>⚙ Models</button>
+  <button class=mbtn id=sopen>☰ Settings</button>
 </header>
 <div class=warnbar id=warn>No local model is running — click <b id=warnopen>⚙ Models</b> for one-click guided setup. Chat works in limited offline mode until then.</div>
 <div id=log><div class=wrap id=stream></div></div>
+<div class=overlay id=ob><div class=panel style="text-align:center">
+  <h2 style="font-size:22px">▲ welcome to termind</h2>
+  <div class=sub>your private local AI — let's set you up (stays on this machine)</div>
+  <input id=obname class=sin placeholder="what should I call you?" style="text-align:center">
+  <input id=obrole class=sin placeholder="what do you do? (optional)" style="text-align:center">
+  <input id=obprefs class=sin placeholder="how do you like answers? e.g. short and direct (optional)" style="text-align:center">
+  <div class=sub style="margin:12px 0 6px">pick a look</div>
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button class="mbtn tbtn" data-t=dark>🌙 dark</button>
+    <button class="mbtn tbtn" data-t=light>☀️ light</button>
+    <button class="mbtn tbtn" data-t=cyber>🌆 cyberpunk</button>
+  </div>
+  <button class=mbtn id=obgo style="margin-top:16px;background:var(--clay);color:#fff;border:0;padding:10px 26px">Start →</button>
+</div></div>
+<div class=overlay id=ss><div class=panel>
+  <h2>☰ Settings</h2>
+  <div class=sub>everything is stored locally · nothing leaves your machine</div>
+  <div class=label style="padding-left:0">profile</div>
+  <input id=sname class=sin placeholder="your name">
+  <input id=srole class=sin placeholder="your role (fed to the model)">
+  <input id=sprefs class=sin placeholder="answer style, e.g. short and direct">
+  <div class=label style="padding-left:0;margin-top:10px">theme</div>
+  <div style="display:flex;gap:8px">
+    <button class="mbtn tbtn" data-t=dark>🌙 dark</button>
+    <button class="mbtn tbtn" data-t=light>☀️ light</button>
+    <button class="mbtn tbtn" data-t=cyber>🌆 cyberpunk</button>
+  </div>
+  <div class=label style="padding-left:0;margin-top:14px">memory</div>
+  <textarea id=smem class=sin rows=3 placeholder="paste memories exported from ChatGPT/Claude — one per line — and click import"></textarea>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class=mbtn id=smemimp>⬆ import</button>
+    <button class=mbtn id=smemexp>⬇ export mine</button>
+    <button class=mbtn id=smemclr>🗑 clear facts</button>
+    <button class=mbtn id=schatclr>🗑 clear all chats</button>
+  </div>
+  <div class=ds id=smemout style="padding:6px 2px"></div>
+  <div class=label style="padding-left:0;margin-top:14px">help & workflows</div>
+  <div id=shelp></div>
+  <div class=ds style="padding:6px 2px">or just ask in chat: <b style="color:var(--clay);cursor:pointer" id=shask>"what are termind's limitations?"</b></div>
+  <div style="text-align:right;margin-top:14px">
+    <button class=mbtn id=ssave style="background:var(--clay);color:#fff;border:0">Save</button>
+    <button class=mbtn id=sclose>Close</button>
+  </div>
+</div></div>
 <div class=overlay id=mm><div class=panel>
   <h2>⚙ Models</h2>
   <div class=sub>your local brains — switch instantly, or download new ones (all run on YOUR machine, $0)</div>
@@ -381,5 +462,59 @@ document.getElementById('mopen').onclick=()=>{mm.classList.add('open');renderMod
 document.getElementById('mclose').onclick=()=>mm.classList.remove('open');
 mm.onclick=(e)=>{if(e.target===mm)mm.classList.remove('open')};
 document.getElementById('warnopen').onclick=()=>{mm.classList.add('open');renderModels()};
-state();loadChats();inp.focus();
+const ss=document.getElementById('ss'),ob=document.getElementById('ob');
+let prof={};
+function applyTheme(t){document.body.dataset.theme=(t&&t!=='dark')?t:'';
+ document.querySelectorAll('.tbtn').forEach(b=>b.classList.toggle('on',b.dataset.t==(t||'dark')))}
+document.querySelectorAll('.tbtn').forEach(b=>b.onclick=()=>{prof.theme=b.dataset.t;
+ applyTheme(prof.theme);fetch('/api/profile',{method:'POST',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:prof.theme})})});
+async function loadProfile(){prof=await (await fetch('/api/profile')).json();
+ applyTheme(prof.theme);
+ document.getElementById('sname').value=prof.name||'';
+ document.getElementById('srole').value=prof.role||'';
+ document.getElementById('sprefs').value=prof.prefs||'';
+ if(!prof.onboarded)ob.classList.add('open')}
+document.getElementById('obgo').onclick=async()=>{
+ const nm=document.getElementById('obname').value.trim()||'friend';
+ await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({name:nm,role:document.getElementById('obrole').value,
+  prefs:document.getElementById('obprefs').value,theme:prof.theme||'dark'})});
+ ob.classList.remove('open');loadProfile();
+ add('bot','welcome aboard, '+nm+' — I will remember you. Try the chips above, or ask me anything.')};
+document.getElementById('sopen').onclick=async()=>{ss.classList.add('open');
+ const h=await (await fetch('/api/help')).json();const sh=document.getElementById('shelp');
+ sh.innerHTML='';Object.entries(h.topics).forEach(([k,v])=>{const d=document.createElement('div');
+  d.className='htop';d.innerHTML='<b>'+k+'</b><div class=hb></div>';
+  d.querySelector('.hb').textContent=v;
+  d.onclick=()=>d.classList.toggle('open');sh.appendChild(d)})};
+document.getElementById('sclose').onclick=()=>ss.classList.remove('open');
+ss.onclick=(e)=>{if(e.target===ss)ss.classList.remove('open')};
+document.getElementById('ssave').onclick=async()=>{
+ await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({name:document.getElementById('sname').value,
+   role:document.getElementById('srole').value,
+   prefs:document.getElementById('sprefs').value})});
+ ss.classList.remove('open');loadProfile()};
+document.getElementById('smemimp').onclick=async()=>{
+ const r=await (await fetch('/api/memory',{method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({op:'import',text:document.getElementById('smem').value})})).json();
+ document.getElementById('smemout').textContent=r.reply;document.getElementById('smem').value=''};
+document.getElementById('smemexp').onclick=async()=>{
+ const r=await (await fetch('/api/memory',{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'export'})})).json();
+ document.getElementById('smem').value=r.reply;
+ document.getElementById('smemout').textContent='your memories ⤴ (copy them anywhere)'};
+document.getElementById('smemclr').onclick=async()=>{if(!confirm('Forget all facts about you?'))return;
+ const r=await (await fetch('/api/memory',{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'clear',what:'facts'})})).json();
+ document.getElementById('smemout').textContent=r.reply};
+document.getElementById('schatclr').onclick=async()=>{if(!confirm('Delete ALL conversations?'))return;
+ await fetch('/api/memory',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({op:'clear',what:'chats'})});loadChats();
+ document.getElementById('smemout').textContent='all chats cleared'};
+document.getElementById('shask').onclick=()=>{ss.classList.remove('open');
+ send("what are termind's limitations?")};
+state();loadChats();loadProfile();inp.focus();
 </script></body></html>"""

@@ -33,7 +33,15 @@ CATALOG = [
     ("mistral", "4.4 GB", "solid general model"),
     ("llava", "4.7 GB", "dedicated vision model"),
 ]
+from .helpdocs import DOC as HELP_DOC, best_topic
 from .store import load as store_load, save as store_save
+
+# Questions about termind itself → the support bot (answers FROM the built-in docs).
+HELP_HINT = re.compile(
+    r"\btermind\b.*\b(what|how|can|do|does|limit|work|use)|"
+    r"\b(what|how)\b.*\b(this tool|this app|termind)\b|"
+    r"\byour (limitations?|features?|capabilit)|"
+    r"\bwhat can you do\b|\bhow do i (import|add|download|switch|delete|index|build)\b", re.I)
 
 # Auto-memory: only when a SENTENCE STARTS with a self-statement — "should i use X?" must
 # not become a remembered "fact".
@@ -569,6 +577,8 @@ class Session:
         follow = self._image_followups(text)
         if follow is not None:
             return follow
+        if HELP_HINT.search(text):
+            return self.do_helpbot(text)              # questions about termind → support bot
         if self.last_image and EDIT_HINT.search(text):
             return self.do_edit(text)                 # "rotate it 90" etc. → edit engine
         return self.do_intent(text) if ACTION_HINT.search(text) else self.do_chat(text)
@@ -618,6 +628,7 @@ class Session:
 
     def chat_messages(self, text: str) -> list:
         """System prompt carries the remembered facts — the model knows who it's talking to."""
+        p = self.profile()
         sys = ("You are termind, a private local AI agent running in the user's terminal. "
                "The HUMAN typing to you is your user — a separate person, not you. "
                "Be concise and direct. ALWAYS honor the user's stated preferences "
@@ -628,6 +639,11 @@ class Session:
                "you performed an action (edit, save, send) — the app does actions and reports "
                "them itself; if asked to do one, tell the user to phrase it as a request like "
                "'remove the logo' and the app will handle it.")
+        if p["name"]:
+            sys += (f" Your user's profile — name: {p['name']}"
+                    + (f", role: {p['role']}" if p['role'] else "")
+                    + (f", answer-style preference: {p['prefs']}" if p['prefs'] else "")
+                    + ". Address them naturally by name when it fits.")
         if self.store["facts"]:
             sys += (" Facts the USER has told you about THEMSELVES (when they ask 'who am I' "
                     "or about their identity, answer from these): "
@@ -947,6 +963,66 @@ class Session:
         return (f"applied {' → '.join(applied)}\nsaved: {out_path} "
                 f"({img.width}x{img.height}) — it's now the active image")
 
+    # ── profile, settings, memory tools, support bot ─────────────────────────
+    def profile(self) -> dict:
+        p = self.store.get("profile") or {}
+        return {"name": p.get("name", ""), "role": p.get("role", ""),
+                "prefs": p.get("prefs", ""), "theme": p.get("theme", "dark"),
+                "onboarded": bool(p.get("name"))}
+
+    def set_profile(self, **fields) -> dict:
+        p = self.store.setdefault("profile", {})
+        for k in ("name", "role", "prefs", "theme"):
+            if fields.get(k) is not None:
+                p[k] = str(fields[k]).strip()
+        store_save(self.store)
+        return self.profile()
+
+    def import_memories(self, text: str) -> str:
+        """Paste memories exported from other AI platforms — each line becomes a fact."""
+        added = 0
+        for line in text.splitlines():
+            fact = line.strip().lstrip("-•* ").strip()
+            if not fact or len(fact) < 4 or fact in self.store["facts"]:
+                continue
+            if added >= 100:
+                break
+            self.store["facts"].append(fact[:300])
+            self.k.syscall("mem.put", key=f"fact#{len(self.store['facts'])-1}",
+                           value=fact[:300], tags=["fact", "imported"])
+            added += 1
+        store_save(self.store)
+        return f"imported {added} memories — I know you better now"
+
+    def export_memories(self) -> str:
+        return "\n".join(self.store["facts"]) or "(no memories yet)"
+
+    def clear_memory(self, what: str) -> str:
+        if what == "facts":
+            self.store["facts"] = []
+            self.store["vecs"] = {}
+        elif what == "docs":
+            self.store["docs"] = {}
+            self.chunks = 0
+        elif what == "chats":
+            self.store["chats"] = {}
+            self.store["active_chat"] = None
+            self.store["history"] = []
+            self.history = []
+        store_save(self.store)
+        return f"cleared {what}"
+
+    def do_helpbot(self, q: str) -> str:
+        """Support bot: answers about termind FROM the built-in docs (works offline too)."""
+        if not self.live:
+            return best_topic(q)
+        with Thinking("checking the manual"):
+            return self._chat([
+                {"role": "system", "content":
+                 "You are termind's support assistant. Answer the question using ONLY this "
+                 "documentation — be concise and concrete:\n\n" + HELP_DOC},
+                {"role": "user", "content": q}])
+
     def do_model(self, name: str = "") -> str:
         if not name:
             installed = list_models()
@@ -1142,6 +1218,15 @@ class Session:
                 return "usage: /chat new · /chat <n> · /chat delete <n>"
             self.chat_open(cid)
             return f"resumed: {self.store['chats'][cid]['title']} ({len(self.history)} messages)"
+        if line.startswith("/profile"):
+            p = self.profile()
+            return (f"name: {p['name'] or '(not set)'} · role: {p['role'] or '-'} · "
+                    f"prefs: {p['prefs'] or '-'} · theme: {p['theme']}"
+                    "\nset it in the web UI (⚙ Settings) — it persists everywhere")
+        if line.startswith("/guide"):
+            q = line[6:].strip()
+            from .helpdocs import DOC, best_topic as _bt
+            return _bt(q) if q else DOC
         if line.startswith("/model"):
             return self.do_model(line[6:].strip())
         if line.startswith("/pull"):
@@ -1223,6 +1308,8 @@ class Session:
             return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith(("/chats", "/chat")):
             return _panel("SESSIONS", out.replace("\n", f"\n{CY}│{N} "), CY)
+        if s.startswith(("/guide", "/profile")):
+            return _panel("HANDBOOK", out.replace("\n", f"\n{GR}│{N} "), GR)
         if s.startswith(("/img", "/edit")):
             return _panel("VISION", out.replace("\n", f"\n{PK}│{N} "), PK)
         if s.startswith("/do"):
