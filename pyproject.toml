@@ -7,7 +7,7 @@ allow-direct-references = true
 
 [project]
 name = "termind"
-version = "0.6.0"
+version = "0.7.0"
 description = "A local AI agent that lives in your terminal — clone, run one command, and it installs everything (Ollama, model, sandbox) and boots a neon agent REPL. $0, private, on AION."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -18,7 +18,7 @@ dependencies = ["aion-os @ git+https://github.com/bhupendra05/aion.git"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pillow"]
-image = ["pillow"]
+image = ["pillow", "rembg", "onnxruntime"]
 
 [project.scripts]
 termind = "termind.cli:main"

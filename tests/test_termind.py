@@ -431,3 +431,55 @@ def test_web_send_image(monkeypatch):
     rep = json.loads(urllib.request.urlopen(req, timeout=5).read())
     assert "red square" in rep["reply"]
     httpd.server_close()
+
+
+def _png_b64(color=(255, 0, 0), size=(80, 60)):
+    import base64, io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, "PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def test_edit_multi_op_natural_language_offline(tmp_path, monkeypatch):
+    pytest.importorskip("PIL")
+    monkeypatch.chdir(tmp_path)
+    s = _session()
+    s.last_image = ("x.png", _png_b64())
+    out = s.handle("/edit make it brighter and grayscale, then flip")  # offline keyword plan
+    assert "applied" in out and "brightness" in out and "grayscale" in out and "flip" in out
+    assert (tmp_path / "x_edited.png").exists()
+
+
+def test_edit_plan_via_model(monkeypatch, tmp_path):
+    pytest.importorskip("PIL")
+    import json as _json
+    import termind.repl as r
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"ops": [{"op": "sepia", "val": None}, {"op": "rotate", "val": 180}]}))
+    s = r.Session(live=True)
+    s.last_image = ("y.png", _png_b64((0, 0, 255)))
+    out = s.do_edit("give it an old warm vintage look upside down")
+    assert "sepia" in out and "rotate 180" in out
+
+
+def test_edit_ops_brightness_and_crop():
+    pytest.importorskip("PIL")
+    import base64, io
+    from PIL import Image
+    from termind.repl import Session
+    img = Image.new("RGB", (100, 40), (10, 10, 10))
+    out = Session._apply_edit(img, "brightness", 300)
+    assert out.getpixel((0, 0))[0] > 10                      # brighter
+    sq = Session._apply_edit(img, "crop", None)
+    assert sq.size == (40, 40)                               # square crop
+
+
+def test_edit_remove_background_live(tmp_path, monkeypatch):
+    pytest.importorskip("rembg")
+    monkeypatch.chdir(tmp_path)
+    s = _session()
+    s.last_image = ("circ.png", _png_b64((255, 0, 0), (64, 64)))
+    out = s.handle("/edit remove background")
+    assert "applied rembg" in out and (tmp_path / "circ_edited.png").exists()

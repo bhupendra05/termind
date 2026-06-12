@@ -78,7 +78,7 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/mkdir <path>{N}  {D}» create folder{N}   {GR}◉{N} {WH}/code <path>{N}  {D}» open VS Code{N}
 {CY}║{N}  {PK}◆{N} {WH}or just say it{N}  {D}» "create a folder x" · "build a tool that…"{N}
 {CY}║{N}  {GR}◉{N} {WH}/img <path> [q]{N}  {D}»{N} the model SEES your image (gemma3/llava)
-{CY}║{N}  {GR}◉{N} {WH}/edit <op>{N}       {D}»{N} grayscale · rotate 90 · resize 50% · flip
+{CY}║{N}  {GR}◉{N} {WH}/edit <req>{N}      {D}»{N} "brighter + b&w" · remove background · crop…
 {CY}║{N}  {GR}◉{N} {WH}/chats{N} {D}» past conversations{N}  {GR}◉{N} {WH}/chat new{N} {D}» fresh chat{N}
 {CY}║{N}  {GR}◉{N} {WH}/model [name]{N}    {D}»{N} list · switch your brain (any Ollama model)
 {CY}║{N}  {GR}◉{N} {WH}/pull <name>{N}     {D}»{N} download a new model (llama3.2, qwen2.5…)
@@ -586,40 +586,107 @@ class Session:
         return self.do_vision(parts[1] if len(parts) > 1 else "", b64,
                               os.path.basename(path))
 
+    EDIT_OPS = ("grayscale · sepia · rotate <deg> · resize <pct>% · flip · brightness <pct> · "
+                "contrast <pct> · blur <px> · sharpen · crop square · remove background — "
+                "or just describe it: 'make it brighter and b&w'")
+
+    @staticmethod
+    def _apply_edit(img, op: str, val: float = None):
+        """One deterministic edit op on a PIL image."""
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+        if op == "grayscale":
+            return ImageOps.grayscale(img).convert("RGB")
+        if op == "sepia":
+            g = ImageOps.grayscale(img)
+            return ImageOps.colorize(g, "#2e1f0e", "#f5e3c2").convert("RGB")
+        if op == "rotate":
+            return img.rotate(-(val if val is not None else 90), expand=True)
+        if op == "resize":
+            p = (val if val is not None else 50) / 100
+            return img.resize((max(1, int(img.width * p)), max(1, int(img.height * p))))
+        if op == "flip":
+            return ImageOps.mirror(img)
+        if op == "brightness":
+            return ImageEnhance.Brightness(img).enhance((val if val is not None else 120) / 100)
+        if op == "contrast":
+            return ImageEnhance.Contrast(img).enhance((val if val is not None else 120) / 100)
+        if op == "blur":
+            return img.filter(ImageFilter.GaussianBlur(val if val is not None else 4))
+        if op == "sharpen":
+            return img.filter(ImageFilter.SHARPEN)
+        if op == "crop":
+            side = min(img.width, img.height)
+            left, top = (img.width - side) // 2, (img.height - side) // 2
+            return img.crop((left, top, left + side, top + side))
+        return img
+
+    def _parse_edit_ops(self, text: str) -> list:
+        """Map an edit request to [(op, val), …] — keywords first, model for free-form."""
+        low = text.lower()
+        num = re.search(r"-?\d+", low)
+        val = float(num.group()) if num else None
+        KEYS = [("remove background", [("rembg", None)]), ("bg remove", [("rembg", None)]),
+                ("gray", [("grayscale", None)]), ("grey", [("grayscale", None)]),
+                ("b&w", [("grayscale", None)]), ("sepia", [("sepia", None)]),
+                ("rotate", [("rotate", val)]), ("resize", [("resize", val)]),
+                ("scale", [("resize", val)]), ("flip", [("flip", None)]),
+                ("bright", [("brightness", val)]), ("contrast", [("contrast", val)]),
+                ("blur", [("blur", val)]), ("sharp", [("sharpen", None)]),
+                ("square", [("crop", None)]), ("crop", [("crop", None)])]
+        hits = [(k, ops) for k, ops in KEYS if k in low]
+        if len(hits) == 1 and not (" and " in low or "," in low or len(low.split()) > 4):
+            return hits[0][1]
+        if not self.live:        # offline: apply every keyword found, in order of appearance
+            found = sorted(((low.find(k), ops) for k, ops in hits), key=lambda x: x[0])
+            return [o for _, ops in found for o in ops]
+        plan = parse_action(self._chat([{"role": "system", "content":
+            'Convert the image-edit request to a JSON plan. Ops: grayscale, sepia, rotate(deg), '
+            'resize(pct), flip, brightness(pct, 100=same), contrast(pct), blur(px), sharpen, '
+            'crop, rembg(remove background). Reply EXACTLY '
+            '{"ops": [{"op": "<name>", "val": <number or null>}, ...]}'},
+            {"role": "user", "content": text}], fmt_json=True))
+        return [(str(o.get("op", "")), o.get("val")) for o in (plan.get("ops") or [])
+                if o.get("op")]
+
     def do_edit(self, op: str) -> str:
-        """Basic local image edits on the last image: grayscale · rotate <deg> ·
-        resize <pct>% · flip. (Generative editing isn't supported by Ollama — this is
-        real, local, deterministic editing via Pillow.)"""
+        """Edit the last image: deterministic Pillow ops, natural-language multi-step plans,
+        and neural background removal (rembg) — all local."""
         if not self.last_image:
             return "no image yet — send one first (web 📎 or /img <path>)"
+        if not op.strip():
+            return "edits: " + self.EDIT_OPS
         try:
-            from PIL import Image, ImageOps
+            from PIL import Image
         except ImportError:
             return "image editing needs Pillow — run: pip install pillow"
         import base64
         import io
+        ops = self._parse_edit_ops(op)
+        if not ops:
+            return "couldn't map that to edits — try: " + self.EDIT_OPS
         name, b64 = self.last_image
-        img = Image.open(io.BytesIO(base64.b64decode(b64)))
-        low = op.lower()
-        m = re.search(r"-?\d+", low)
-        if "gray" in low or "grey" in low or "b&w" in low:
-            img = ImageOps.grayscale(img)
-        elif "rotate" in low:
-            img = img.rotate(-(int(m.group()) if m else 90), expand=True)
-        elif "resize" in low or "scale" in low:
-            pct = (int(m.group()) if m else 50) / 100
-            img = img.resize((max(1, int(img.width * pct)), max(1, int(img.height * pct))))
-        elif "flip" in low:
-            img = ImageOps.mirror(img)
-        else:
-            return "edits: grayscale · rotate <deg> · resize <pct>% · flip"
+        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGBA")
+        applied = []
+        for o, val in ops:
+            if o == "rembg":               # neural background removal, fully local
+                try:
+                    from rembg import remove
+                except ImportError:
+                    return ("background removal needs rembg — run: pip install rembg "
+                            "(one-time ~170MB model download on first use)")
+                with Thinking("removing background (neural)"):
+                    img = remove(img)
+            else:
+                img = self._apply_edit(img.convert("RGB"), o, val).convert("RGBA")
+            applied.append(o + (f" {val:g}" if val is not None else ""))
         out_path = os.path.join(os.getcwd(), os.path.splitext(name)[0] + "_edited.png")
         img.save(out_path, "PNG")
         with open(out_path, "rb") as f:
             self.last_image = (os.path.basename(out_path),
                                base64.b64encode(f.read()).decode())
         self.actions += 1
-        return f"saved: {out_path} ({img.width}x{img.height}) — it's now the active image"
+        return (f"applied {' → '.join(applied)}\nsaved: {out_path} "
+                f"({img.width}x{img.height}) — it's now the active image")
 
     def do_model(self, name: str = "") -> str:
         if not name:

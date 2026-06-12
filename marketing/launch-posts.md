@@ -167,3 +167,29 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the warm-grey Claude-style termind chat window; in it, a user bubble containing a small photo thumbnail of a red circle with a 📎 icon, and below it the assistant reply: **"Red circle. Simple. Precise."** A side ribbon shows three mini edit chips: "grayscale", "rotate 90", "resize 50%" with before/after mini-thumbnails. A lock badge reads "image never leaves your machine." Top headline in bold charcoal: **"Your local agent can see now."** Subtitle: "termind v0.6 · image upload · Gemma 3 vision · local edits · private · $0/query." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.7 — Real image editing, in plain English
+
+### 📣 Post
+
+> **"make it brighter, black and white, and rotate it 45 degrees" — my local agent just… did it. And then removed the background with a neural net. All offline.**
+>
+> termind v0.7 turns image editing into a conversation:
+>
+> 🗣️ **Describe the edit** — the local model converts your sentence into an edit plan and applies it step by step: brightness, contrast, sepia, blur, sharpen, crop-to-square, rotate, resize, flip — chained in one go.
+> 🧠 **Neural background removal** — `/edit remove background` runs U2Net (rembg) locally. No remove.bg subscription, no upload — the cutout never leaves your machine.
+> 📎 Upload in the web UI or `/img` in the terminal; every edit saves a new file and becomes the active image, so you can keep refining.
+>
+> Honest scope: deterministic edits + neural cutouts — not cloud genAI fill. It's the local, private, free 80% of what people actually use editors for.
+>
+> Private · $0 · sandboxed on AION · 53 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #ImageEditing #Ollama #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the warm-grey termind chat; a user bubble says **"make it brighter, b&w, rotate 45°"** above a small photo thumbnail; beneath, an arrow chain of three mini image states (original → edited → background removed, the last on a transparent checkerboard) each with a tag: "plan → apply → cutout (U2Net)". A lock badge: "edits never leave your machine." Top headline in bold charcoal: **"Edit images by talking. Locally."** Subtitle: "termind v0.7 · NL edit plans · neural background removal · private · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
