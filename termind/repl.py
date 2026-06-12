@@ -43,6 +43,14 @@ EDIT_HINT = re.compile(
     r"|\bmake\s+(it|this|the\s+(image|photo|picture))\b.*\b(bright|dark|sharp|big|small|square)"
     r"|\bedit\s+(this|the|that)\s+(image|photo|picture)\b", re.I)
 
+# A bare position reply ("right bottom corner .") — resumes a pending removal.
+POSITION_ONLY = re.compile(
+    r"^[\s.,!]*(?:it'?s\s+)?(?:in|at|on)?\s*(?:the\s+)?"
+    r"((?:top|bottom|upper|lower|left|right|center|middle)[\w\s-]*?)[\s.,!]*$", re.I)
+
+# "send/show me the image" — return the ACTUAL current image, never let the model fake it.
+SHOW_IMG = re.compile(r"\b(send|show|give|display)\b.*\b(image|picture|photo|it)\b", re.I)
+
 # "remove/erase the <object>" (but NOT the background — that's rembg's job).
 # Position words ("in the top right") are KEPT — they localize deterministically.
 OBJ_REMOVE = re.compile(
@@ -234,6 +242,7 @@ class Session:
             if cid else list(self.store["history"])
         self.actions = 0
         self.last_image = None       # (name, base64) of the most recent image, for /edit
+        self._pending_remove = None  # target of a failed removal awaiting "where is it"
 
     # ── chat sessions: new chat, continue previous, switch ───────────────────
     def _new_chat_id(self) -> str:
@@ -516,7 +525,22 @@ class Session:
             return self.do_build(text, confirm=confirm)
         return self.do_chat(text)
 
+    def _image_followups(self, text: str):
+        """Replies that continue an image task: a bare position resumes a failed removal;
+        'send me the image' returns the real image. None ⇒ not a follow-up."""
+        if self.last_image and self._pending_remove:
+            m = POSITION_ONLY.match(text)
+            if m:
+                target, self._pending_remove = self._pending_remove, None
+                return self.do_edit(f"remove the {target} in the {m.group(1).strip()}")
+        if self.last_image and SHOW_IMG.search(text):
+            return f"here's the current image ({self.last_image[0]}) ⤵"
+        return None
+
     def route(self, text: str) -> str:
+        follow = self._image_followups(text)
+        if follow is not None:
+            return follow
         if self.last_image and EDIT_HINT.search(text):
             return self.do_edit(text)                 # "rotate it 90" etc. → edit engine
         return self.do_intent(text) if ACTION_HINT.search(text) else self.do_chat(text)
@@ -572,7 +596,10 @@ class Session:
                "(answer length, tone, style) in every reply. You are NOT text-only: you can "
                "SEE images the user attaches, and the app EDITS images on request (background "
                "removal, brightness, contrast, crop, rotate, resize, sepia, blur…). If asked "
-               "whether you can edit an image, say yes and ask what edit they want.")
+               "whether you can edit an image, say yes and ask what edit they want. NEVER claim "
+               "you performed an action (edit, save, send) — the app does actions and reports "
+               "them itself; if asked to do one, tell the user to phrase it as a request like "
+               "'remove the logo' and the app will handle it.")
         if self.store["facts"]:
             sys += (" Facts the USER has told you about THEMSELVES (when they ask 'who am I' "
                     "or about their identity, answer from these): "
@@ -837,8 +864,10 @@ class Session:
                             "pip install opencv-python-headless numpy")
                 bbox = self._find_region(img, str(val))
                 if not bbox:
-                    return (f"couldn't locate '{val}' — tell me WHERE it is and I'll trust "
-                            f"you, e.g. 'remove the {val} in the top right corner'")
+                    self._pending_remove = str(val)   # a bare "bottom right" reply resumes this
+                    return (f"couldn't locate '{val}' — just tell me WHERE it is "
+                            f"(e.g. 'top right corner') and I'll erase it there.")
+                self._pending_remove = None
                 with Thinking(f"erasing '{val}'"):
                     img = self._inpaint_region(img, bbox).convert("RGBA")
                     # post-check: still visible? expand the region 15% and erase again
@@ -1012,6 +1041,9 @@ class Session:
                     self.last_image = (image_name, image)
                     return self.do_edit(line)
                 return self.do_vision(line, image, image_name)
+            follow = self._image_followups(line)
+            if follow is not None:
+                return follow
             if self.last_image and EDIT_HINT.search(line) and not line.startswith("/"):
                 return self.do_edit(line)             # edit the previously sent image
             if line.strip().lower().startswith(("/build", "create", "make", "build", "new")) \

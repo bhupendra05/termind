@@ -74,8 +74,9 @@ class _Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     out = f"error: {e}"
             resp = {"reply": _strip_ansi(out)}
-            # an edit happened → send the result image back so the user SEES it
-            if out.startswith("applied") and self.session.last_image:
+            # an edit happened or the user asked to see it → return the actual image
+            if self.session.last_image and (out.startswith("applied")
+                                            or out.startswith("here's the current image")):
                 resp["image"] = self.session.last_image[1]
             return self._send(200, json.dumps(resp))
         if self.path == "/api/chat":

@@ -631,3 +631,37 @@ def test_user_position_words_win(tmp_path, monkeypatch):
     assert "removed" in out
     from PIL import Image as I2
     assert I2.open(tmp_path / "p_edited.png").convert("RGB").getpixel((180, 20))[0] > 100
+
+
+def test_position_followup_resumes_failed_removal(tmp_path, monkeypatch):
+    """THE screenshot flow: locate fails → user replies 'right bottom corner .' → erased."""
+    pytest.importorskip("cv2")
+    import base64, io, json as _json
+    import termind.repl as r
+    from PIL import Image, ImageDraw
+    monkeypatch.chdir(tmp_path)
+    img = Image.new("RGB", (200, 200), (200, 30, 30))
+    ImageDraw.Draw(img).rectangle([150, 150, 200, 200], fill=(0, 0, 0))  # logo bottom-right
+    buf = io.BytesIO(); img.save(buf, "PNG")
+    def vlm(msgs, **k):                                  # locate always fails / nothing visible
+        return _json.dumps({"present": False, "found": False})
+    monkeypatch.setattr(r, "chat", vlm)
+    s = r.Session(live=True)
+    s.last_image = ("ad.png", base64.b64encode(buf.getvalue()).decode())
+    out1 = s.handle_web("remove the gemini logo from my image")
+    assert "couldn't locate" in out1 and s._pending_remove == "gemini logo"
+    out2 = s.handle_web("right bottom corner .")
+    assert "removed" in out2 and s._pending_remove is None
+    from PIL import Image as I2
+    assert I2.open(tmp_path / "ad_edited.png").convert("RGB").getpixel((180, 180))[0] > 100
+
+
+def test_send_me_image_returns_real_image():
+    s = _session()
+    s.last_image = ("pic.png", _png_b64())
+    out = s.handle_web("then send me image")
+    assert out.startswith("here's the current image (pic.png)")
+
+
+def test_no_fabricated_actions_in_system_prompt():
+    assert "NEVER claim you performed an action" in _session().chat_messages("x")[0]["content"]
