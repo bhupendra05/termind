@@ -776,3 +776,68 @@ def test_web_chat_delete_and_catalog(monkeypatch):
     c = json.loads(urllib.request.urlopen(url + "/api/catalog", timeout=3).read())
     assert any(x["name"] == "qwen2.5" for x in c["catalog"]) and "pull" in c
     httpd.server_close()
+
+
+def test_import_rejects_non_gguf():
+    out = _session().import_model("/tmp/not-a-model.txt")
+    assert ".gguf" in out
+
+
+def test_import_own_gguf_registers_with_ollama(tmp_path, monkeypatch):
+    import time as _t
+    import termind.repl as r
+    gguf = tmp_path / "My Fine_Tune V2.gguf"
+    gguf.write_bytes(b"GGUF fake")
+    calls = {}
+    monkeypatch.setattr(r.shutil, "which", lambda b: "/usr/local/bin/ollama")
+    def fake_run(cmd, **k):
+        calls["cmd"] = cmd
+        class R: returncode = 0; stderr = ""
+        return R()
+    monkeypatch.setattr(r.subprocess, "run", fake_run)
+    s = _session()
+    out = s.import_model(str(gguf))
+    assert "importing your model as 'my-fine-tune-v2'" in out      # name sanitized
+    for _ in range(50):
+        if s.pull["status"] == "done":
+            break
+        _t.sleep(0.05)
+    assert s.pull["status"] == "done"
+    assert calls["cmd"][:3] == ["ollama", "create", "my-fine-tune-v2"]
+
+
+def test_add_model_routes_gguf_vs_pull(tmp_path, monkeypatch):
+    import termind.repl as r
+    s = _session()
+    monkeypatch.setattr(r.Session, "import_model",
+                        lambda self, p, n=None: f"IMPORT:{p}")
+    monkeypatch.setattr(r.Session, "start_pull", lambda self, n: f"PULL:{n}")
+    assert s.add_model("~/models/x.gguf").startswith("IMPORT:")
+    assert s.add_model("hf.co/xyz/their-model") == "PULL:hf.co/xyz/their-model"
+    assert "usage" in s.add_model("")
+
+
+def test_terminal_import_command(tmp_path, monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r.Session, "import_model",
+                        lambda self, p, n=None: f"IMPORT:{p}|{n}")
+    s = _session()
+    assert s.handle("/import ~/m.gguf custom-name") == "IMPORT:~/m.gguf|custom-name"
+    assert "usage" in s.handle("/import")
+
+
+def test_web_import_endpoint(monkeypatch):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    monkeypatch.setattr(r.Session, "add_model",
+                        lambda self, spec, name=None: f"ADDED:{spec}")
+    s = r.Session(live=False)
+    httpd, url = serve(s, port=8809, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    req = urllib.request.Request(url + "/api/import",
+        data=json.dumps({"spec": "hf.co/xyz/their-model"}).encode(),
+        headers={"Content-Type": "application/json"})
+    d = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    assert d["reply"] == "ADDED:hf.co/xyz/their-model"
+    httpd.server_close()

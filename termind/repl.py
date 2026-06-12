@@ -957,7 +957,9 @@ class Session:
                               {m.split(":")[0] for m in installed})
             return ("active: " + self.model + "\n" + "\n".join(rows)
                     + "\nswitch: /model <name> · sessions: /chats"
-                    + ("\nget more brains (guided):\n" + guide if guide else ""))
+                    + ("\nget more brains (guided):\n" + guide if guide else "")
+                    + "\nbring YOUR OWN model: /import <path.gguf> · "
+                      "/pull hf.co/<user>/<repo> · remote server: OLLAMA_HOST=<url>")
         if not model_available(name):
             return f"'{name}' isn't pulled yet — run: /pull {name}"
         self.model = name
@@ -993,6 +995,60 @@ class Session:
                 self.pull = {"status": "error", "name": name, "error": str(e)[:140]}
         threading.Thread(target=run, daemon=True).start()
         return f"downloading {name} in the background — progress shows in ⚙ Models"
+
+    def import_model(self, path: str, name: str = None) -> str:
+        """Register the user's OWN model (a local .gguf fine-tune) with Ollama, in the
+        background. After this it behaves like any catalog model: /model <name>, web picker…"""
+        full = os.path.expanduser(path.strip())
+        if not full.lower().endswith(".gguf") or not os.path.isfile(full):
+            return ("import needs the path to a local .gguf file "
+                    "(e.g. /import ~/models/my-finetune.gguf my-model)")
+        if not shutil.which("ollama"):
+            return "ollama isn't installed — run ./setup.sh first"
+        if self.pull.get("status") == "pulling":
+            return f"busy with {self.pull.get('name')} — one download/import at a time"
+        name = re.sub(r"[^a-z0-9.-]+", "-",
+                      (name or os.path.splitext(os.path.basename(full))[0]).lower()).strip("-")
+        self.pull = {"status": "pulling", "name": name, "pct": 0,
+                     "stage": "importing your gguf"}
+
+        def run():
+            import tempfile
+            mf = None
+            try:
+                with tempfile.NamedTemporaryFile("w", suffix=".Modelfile",
+                                                 delete=False) as f:
+                    f.write(f"FROM {full}\n")
+                    mf = f.name
+                r = subprocess.run(["ollama", "create", name, "-f", mf],
+                                   capture_output=True, text=True, timeout=3600)
+                if r.returncode != 0:
+                    self.pull = {"status": "error", "name": name,
+                                 "error": (r.stderr or "ollama create failed").strip()[:140]}
+                else:
+                    self.pull = {"status": "done", "name": name, "pct": 100}
+            except Exception as e:
+                self.pull = {"status": "error", "name": name, "error": str(e)[:140]}
+            finally:
+                if mf:
+                    try:
+                        os.unlink(mf)
+                    except OSError:
+                        pass
+        threading.Thread(target=run, daemon=True).start()
+        return (f"importing your model as '{name}' — when it's done, switch with: "
+                f"/model {name}")
+
+    def add_model(self, spec: str, name: str = None) -> str:
+        """One entry point for 'bring your own model': a local .gguf path → import;
+        anything else (hf.co/user/repo, ollama names) → pull."""
+        spec = spec.strip()
+        if not spec:
+            return ("usage: a local .gguf path, or hf.co/<user>/<repo>, or any Ollama "
+                    "model name")
+        if spec.lower().endswith(".gguf"):
+            return self.import_model(spec, name)
+        return self.start_pull(spec)
 
     def do_pull(self, name: str) -> str:
         if not shutil.which("ollama"):
@@ -1091,6 +1147,12 @@ class Session:
         if line.startswith("/pull"):
             n = line[5:].strip()
             return self.do_pull(n) if n else "usage: /pull <model name>  e.g. /pull llama3.2"
+        if line.startswith("/import"):
+            parts = line[7:].strip().split(None, 1)
+            if not parts:
+                return ("usage: /import <path/to/model.gguf> [name] — bring your own "
+                        "fine-tuned model. From Hugging Face: /pull hf.co/<user>/<repo>")
+            return self.import_model(parts[0], parts[1] if len(parts) > 1 else None)
         if line.startswith("/do"):
             t = line[3:].strip()
             return self.do_action(t) if t else "usage: /do <task in plain english>"
@@ -1157,7 +1219,7 @@ class Session:
             return _panel("MEMORY RECALL", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith("/think"):
             return _panel("DEEP THOUGHT", out.replace("\n", f"\n{CY}│{N} "), CY)
-        if s.startswith(("/model", "/pull")):
+        if s.startswith(("/model", "/pull", "/import")):
             return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith(("/chats", "/chat")):
             return _panel("SESSIONS", out.replace("\n", f"\n{CY}│{N} "), CY)

@@ -96,6 +96,11 @@ class _Handler(BaseHTTPRequestHandler):
             out = self.session.start_pull(str(req.get("model", "")).strip())
             return self._send(200, json.dumps({"reply": out,
                                                "pull": dict(self.session.pull)}))
+        if self.path == "/api/import":
+            out = self.session.add_model(str(req.get("spec", "")),
+                                         (req.get("name") or None))
+            return self._send(200, json.dumps({"reply": out,
+                                               "pull": dict(self.session.pull)}))
         if self.path == "/api/model":
             name = (req.get("model") or "").strip()
             with self.session._lock:
@@ -156,6 +161,9 @@ border:1px solid transparent}
 .mbtn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;
 padding:6px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;flex:none}
 .mbtn:hover{border-color:var(--clay)}.mbtn.active{border-color:var(--green);color:var(--green)}
+#mspec{flex:1;background:var(--card);border:1px solid var(--line);border-radius:8px;
+padding:8px 10px;color:var(--ink);font-family:inherit;font-size:12.5px;outline:none}
+#mspec:focus{border-color:var(--clay)}
 .bar{height:6px;border-radius:4px;background:var(--card);overflow:hidden;margin-top:6px}
 .bar>div{height:100%;background:linear-gradient(90deg,var(--clay),var(--purple));width:0%;
 transition:width .4s}
@@ -227,6 +235,16 @@ button.send:hover{background:var(--clay2)}button.send:disabled{opacity:.4;cursor
   <div id=minstalled></div>
   <div class=sub style="margin-top:14px">get more models <span style="opacity:.7">· one click, guided, downloads via Ollama</span></div>
   <div id=mcatalog></div>
+  <div class=sub style="margin-top:16px">bring YOUR OWN model</div>
+  <div class=mrow style="gap:8px">
+    <input id=mspec placeholder="~/models/my-finetune.gguf  ·  or  hf.co/you/your-model">
+    <button class=mbtn id=madd>＋ add</button>
+  </div>
+  <div class=ds style="padding:2px 8px 0;line-height:1.6">
+    🧬 your local fine-tune: paste the path to its <b>.gguf</b> file<br>
+    🤗 from Hugging Face: paste <b>hf.co/&lt;user&gt;/&lt;repo&gt;</b> (GGUF repos work directly)<br>
+    🌐 model on another machine: launch with <b>OLLAMA_HOST=http://that-host:11434 termind</b>
+  </div>
   <div id=mpull style="display:none"><div class=sub id=mpulltxt></div><div class=bar><div id=mpullbar></div></div></div>
   <div style="text-align:right;margin-top:14px"><button class=mbtn id=mclose>Close</button></div>
 </div></div>
@@ -350,6 +368,15 @@ function pollPull(){mp.style.display='block';if(mpoll)return;
   else{clearInterval(mpoll);mpoll=null;
    mpt.textContent=p.status=='done'?p.name+' ready — click "use" to switch':'failed: '+(p.error||'');
    mpb.style.width='100%';state();renderModels()}},1500)}
+document.getElementById('madd').onclick=async()=>{
+ const spec=document.getElementById('mspec').value.trim();if(!spec)return;
+ const r=await (await fetch('/api/import',{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:spec})})).json();
+ document.getElementById('mspec').value='';
+ mpt.textContent=r.reply;mp.style.display='block';
+ if(r.pull&&r.pull.status=='pulling')pollPull();};
+document.getElementById('mspec').addEventListener('keydown',e=>{
+ if(e.key=='Enter')document.getElementById('madd').click()});
 document.getElementById('mopen').onclick=()=>{mm.classList.add('open');renderModels()};
 document.getElementById('mclose').onclick=()=>mm.classList.remove('open');
 mm.onclick=(e)=>{if(e.target===mm)mm.classList.remove('open')};

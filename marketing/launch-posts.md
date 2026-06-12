@@ -267,3 +267,27 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the warm-grey termind web UI with a floating **"⚙ Models"** panel: a list of model cards — "gemma3 · 3.3 GB · all-rounder ✓ active", "qwen2.5 · 4.7 GB · coding ⬇", "deepseek-r1 · 4.7 GB · reasoning ⬇" — and one card mid-download with a glowing clay-to-violet progress bar at 62%. In the sidebar behind, a chat row shows a small ✕ hover-delete. Top headline in bold charcoal: **"An app store for local AI brains."** Subtitle: "termind v0.10 · one-click model downloads · guided · delete old chats · private · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.11 — Bring YOUR OWN model
+
+### 📣 Post
+
+> **You fine-tuned your own model? termind v0.11 makes it a first-class citizen — three ways:**
+>
+> 🧬 **Your local fine-tune** — paste the path to your .gguf in the Models panel (or `/import ~/models/my-finetune.gguf`). termind registers it with Ollama in the background; it appears in the model bay like any other brain. Switch to it, chat with it, /build with it.
+> 🤗 **Straight from Hugging Face** — paste `hf.co/you/your-model` and it downloads with a live progress bar. Any GGUF repo works.
+> 🌐 **A model on another machine** — `OLLAMA_HOST=http://your-server:11434 termind` points the whole agent (terminal + web) at a remote Ollama.
+>
+> One input box in the browser handles all of it, with plain-English guidance for each path. Names get sanitized, downloads stream in the background, and your custom model persists as the default if you pick it.
+>
+> Your model. Your machine. Your agent. $0. 78 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #FineTuning #Ollama #HuggingFace #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind Models panel with a highlighted **"bring YOUR OWN model"** section: an input field containing `~/models/my-finetune.gguf`, an "＋ add" button mid-click, and three small labeled lanes flowing into the model bay rack: 🧬 "your .gguf fine-tune", 🤗 "hf.co/you/your-model", 🌐 "remote OLLAMA_HOST". The rack below shows the custom model slotting in beside gemma3 with a "✓ active" tag. Top headline in bold charcoal: **"Your fine-tune deserves a first-class seat."** Subtitle: "termind v0.11 · import any GGUF · Hugging Face direct · remote servers · private · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
