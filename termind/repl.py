@@ -1033,6 +1033,9 @@ class Session:
         if self.agent_mode == "plan":
             return self.do_plan(text)
         sys_p = self.CODE_SYS.format(ws=self.workspace())
+        listing = self._ws_filelist()
+        if listing:
+            sys_p += "\nFiles currently in the workspace: " + listing
         msgs = [{"role": "system", "content": sys_p}] + self.history[-8:] + [
             {"role": "user", "content": text}]
         log = []
@@ -1043,6 +1046,8 @@ class Session:
         for _ in range(12):
             with Thinking("code agent working"):
                 act = parse_action(self._chat(msgs, fmt_json=True))
+            if "final" in act and "tool" not in act:    # prose → treat as conversation
+                act = {"tool": "say", "say": act["final"]}
             tool = str(act.get("tool", "")).lower()
             if tool in ("done", "say") or ("say" in act and not tool):
                 wrote = any(line.startswith("✓ write") for line in log)
@@ -1125,10 +1130,40 @@ class Session:
         self.actions += 1
         return f"wrote {rel} ({len(content.splitlines())} lines)"
 
+    def _ws_filelist(self, limit: int = 25) -> str:
+        return ", ".join(e["path"] for e in self.ws_tree(limit) if not e["dir"])
+
     def _agent_run(self, cmd: str) -> str:
+        tok = cmd.split()
+        ws = self.workspace()
+        # "app.py" or a wrong absolute path → find the real file in the workspace
+        if tok and tok[0].endswith(".py"):
+            cand = tok[0]
+            if not os.path.isfile(os.path.join(ws, cand)):
+                base = os.path.basename(cand)
+                hits = [e["path"] for e in self.ws_tree()
+                        if not e["dir"] and os.path.basename(e["path"]) == base]
+                if hits:
+                    cand = hits[0]
+            if os.path.isfile(os.path.join(ws, cand)):
+                cmd = "python3 " + cand + (" " + " ".join(tok[1:]) if tok[1:] else "")
         checked = self._dry_run(cmd)
         if not checked:
-            return f"can't run — '{cmd.split()[0] if cmd.split() else cmd}' not found"
+            return (f"can't run — '{cmd.split()[0] if cmd.split() else cmd}' not found. "
+                    f"Files present: {self._ws_filelist() or '(none)'}")
+        ctok = checked.split()
+        if len(ctok) >= 2 and ctok[0] in ("python3", "python") and ctok[1].endswith(".py") \
+                and not os.path.isfile(os.path.join(ws, ctok[1].lstrip("/"))) \
+                and not os.path.isfile(ctok[1]):
+            base = os.path.basename(ctok[1])
+            hits = [e["path"] for e in self.ws_tree()
+                    if not e["dir"] and os.path.basename(e["path"]) == base]
+            if hits:
+                ctok[1] = hits[0]
+                checked = " ".join(ctok)
+            else:
+                return (f"can't run — {ctok[1]} doesn't exist. Files present: "
+                        f"{self._ws_filelist() or '(none)'}")
         try:
             res = subprocess.run(checked, shell=True, cwd=self.workspace(),
                                  capture_output=True, text=True, timeout=60)

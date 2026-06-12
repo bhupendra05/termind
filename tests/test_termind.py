@@ -1216,3 +1216,43 @@ def test_loop_breaks_repeat_failure_spiral(tmp_path, monkeypatch):
     assert out.count("✗") <= 3                                         # not 11 wasted steps
     assert "stopped retrying" in out
     assert "✓" not in out.split("\n\n")[0]                             # failures marked ✗
+
+
+def test_prose_replies_dont_burn_the_loop(tmp_path, monkeypatch):
+    """First transcript bug: 12 silent steps then 'step limit reached'."""
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "Sure! I would make a calculator…")
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s.handle_web("create a calculator project here")
+    assert "step limit" not in out                       # ends as conversation, not a stall
+
+
+def test_run_resolves_script_paths(tmp_path, monkeypatch):
+    """Second transcript bug: 'run it' guessed a wrong path and failed."""
+    import termind.repl as r
+    s = _session()
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    (tmp_path / "calculator").mkdir()
+    (tmp_path / "calculator" / "main.py").write_text("print('calc works')")
+    out = s._agent_run("/Users/nope/wrong/path/main.py")     # wrong absolute guess
+    assert "calc works" in out                               # resolved by basename
+    out2 = s._agent_run("python3 /also/wrong/main.py")
+    assert "calc works" in out2
+    out3 = s._agent_run("python3 ghost.py")
+    assert "Files present" in out3 and "main.py" in out3     # helpful listing back
+
+
+def test_agent_sees_file_list(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    seen = {}
+    def spy(msgs, **k):
+        seen["sys"] = msgs[0]["content"]
+        return _json.dumps({"tool": "done", "say": "ok"})
+    monkeypatch.setattr(r, "chat", spy)
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    (tmp_path / "main.py").write_text("x=1")
+    s.handle_web("what files do we have?")
+    assert "main.py" in seen["sys"]                          # the agent KNOWS its files
