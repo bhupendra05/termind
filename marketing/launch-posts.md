@@ -337,3 +337,33 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Left: the termind sidebar with a chat row mid-rename — an inline cursor, a glowing pencil ✎ icon, and the title changing from "knife is in person hands ." to "Image Lab". Right: the new welcome screen as a floating card — gradient ▲ mark hovering, "welcome to termind", name field reading "Bhupendra", three theme swatches. Top headline in bold charcoal: **"The little things make it feel pro."** Subtitle: "termind v0.13 · rename sessions · hero onboarding · three themes · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.14 — Code Mode & the Motion Update
+
+### 📣 Post
+
+> **termind v0.14 — my local agent got a Code Mode (think Claude Code energy) and the whole app learned to move.**
+>
+> ⌥ **CODE MODE** — one toggle and the chat becomes a workspace agent:
+> · point it at any folder — builds, files and commands now happen THERE
+> · 📁 a live file tree in the browser — click any file to read it in chat
+> · "create a folder utils", "write a config loader", "build a CLI here" — elevated file powers, same one brain
+> · terminal twins: /ws, /tree, /read
+>
+> ✨ **The Motion Update** — every interaction now responds:
+> · messages slide in (yours from the right, termind's from the left, avatar pops)
+> · live typing dots while it thinks · buttons press down · panels spring open with staggered rows
+> · 🎉 confetti + a green pulse every time a task completes — building things feels GOOD
+> · a live clock in the header (it glows in cyberpunk theme)
+>
+> Local · private · $0 · 92 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #OpenSource #BuildInPublic #DeveloperTools #UIUX
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind web app in code mode — a clay-tinted workspace bar reading "⌥ CODE MODE · ~/Developer/my-app", a slim file tree open beneath it, and in the chat a completed task bubble ("built my-app/ with 4 files") with tiny confetti pieces bursting off it and a soft green pulse ring. A small live clock pill ("17:42:08") in the header. Motion lines suggest the message sliding in. Top headline in bold charcoal: **"Your agent has a Code Mode now."** Subtitle: "termind v0.14 · workspace powers · file tree · confetti-grade feedback · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

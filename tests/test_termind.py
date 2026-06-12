@@ -939,3 +939,51 @@ def test_web_chat_rename_endpoint():
     d = json.loads(urllib.request.urlopen(req, timeout=3).read())
     assert d["chats"][0]["title"] == "Q3 Roadmap"
     httpd.server_close()
+
+
+def test_workspace_set_tree_read(tmp_path):
+    s = _session()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('hi')")
+    (tmp_path / "README.md").write_text("# my project")
+    out = s.set_workspace(str(tmp_path))
+    assert "workspace set" in out and s.workspace() == str(tmp_path)
+    paths = {e["path"] for e in s.ws_tree()}
+    assert "README.md" in paths and "src" in paths and "src/app.py" in paths
+    assert s.ws_read("src/app.py") == "print('hi')"
+    assert "outside the workspace" in s.ws_read("../../etc/passwd")
+    s2 = _session()
+    assert s2.workspace() == str(tmp_path)               # persists across restarts
+
+
+def test_terminal_ws_and_tree_commands(tmp_path):
+    s = _session()
+    (tmp_path / "main.py").write_text("x = 1")
+    s.handle(f"/ws {tmp_path}")
+    out = s.handle("/tree")
+    assert "main.py" in out and str(tmp_path) in out
+    assert s.handle("/read main.py") == "x = 1"
+
+
+def test_web_ws_endpoint(tmp_path):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    s = r.Session(live=False)
+    (tmp_path / "hello.txt").write_text("workspace works")
+    httpd, url = serve(s, port=8815, open_browser=False)
+    def post(body):
+        threading.Thread(target=httpd.handle_request, daemon=True).start()
+        req = urllib.request.Request(url + "/api/ws", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=3).read())
+    assert "workspace set" in post({"op": "set", "path": str(tmp_path)})["reply"]
+    assert any(e["path"] == "hello.txt" for e in post({"op": "tree"})["tree"])
+    assert post({"op": "read", "path": "hello.txt"})["content"] == "workspace works"
+    httpd.server_close()
+
+
+def test_motion_layer_served():
+    from termind.web import PAGE
+    assert all(k in PAGE for k in ("class=typing", "@keyframes bounce", "celebrate(",
+                                   "@keyframes confl", "id=clk", "⌥ Code", "wsbar"))

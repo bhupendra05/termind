@@ -126,6 +126,22 @@ class _Handler(BaseHTTPRequestHandler):
                     out = "unknown op"
             return self._send(200, json.dumps({"reply": out,
                                                "facts": len(s.store["facts"])}))
+        if self.path == "/api/ws":
+            s = self.session
+            op = req.get("op")
+            with s._lock:
+                if op == "set":
+                    return self._send(200, json.dumps(
+                        {"reply": s.set_workspace(str(req.get("path", "."))),
+                         "workspace": s.workspace()}))
+                if op == "tree":
+                    return self._send(200, json.dumps(
+                        {"workspace": s.workspace(), "tree": s.ws_tree()}))
+                if op == "read":
+                    return self._send(200, json.dumps(
+                        {"path": req.get("path", ""),
+                         "content": s.ws_read(str(req.get("path", "")))}))
+            return self._send(400, json.dumps({"error": "bad op"}))
         if self.path == "/api/model":
             name = (req.get("model") or "").strip()
             with self.session._lock:
@@ -319,6 +335,54 @@ box-shadow:0 10px 30px var(--ring);animation:bob 3s ease-in-out infinite}
 background:linear-gradient(135deg,var(--clay),var(--clay2))!important;
 box-shadow:0 6px 18px var(--ring);transition:transform .15s,box-shadow .2s}
 #obgo:hover{transform:translateY(-2px);box-shadow:0 10px 26px var(--ring);color:#fff}
+/* ── code mode ── */
+#wsbar{display:none;align-items:center;gap:9px;padding:9px 22px;border-bottom:1px solid var(--line);
+background:color-mix(in srgb,var(--clay) 5%,var(--bg));animation:slidedown .3s ease}
+#wsbar.on{display:flex}
+@keyframes slidedown{from{opacity:0;transform:translateY(-8px)}to{opacity:1}}
+.wslab{font-size:10.5px;font-weight:700;letter-spacing:1.4px;color:var(--clay)}
+#wspath{flex:1;background:var(--card);border:1px solid var(--line);border-radius:9px;
+padding:7px 11px;color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:12px;outline:none}
+#wspath:focus{border-color:var(--clay)}
+#wstreebox{display:none;max-height:200px;overflow-y:auto;border-bottom:1px solid var(--line);
+padding:8px 22px;background:var(--side);font-family:'JetBrains Mono',monospace;font-size:12px}
+#wstreebox.on{display:block;animation:slidedown .25s ease}
+.tre{padding:2.5px 6px;border-radius:6px;cursor:pointer;color:var(--dim);white-space:pre}
+.tre:hover{background:var(--card);color:var(--clay)}
+.tre.dir{color:var(--ink);font-weight:600}
+/* ── clock ── */
+#clk{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--dim);
+border:1px solid var(--line);border-radius:20px;padding:5px 12px;background:var(--card);
+min-width:74px;text-align:center}
+[data-theme=cyber] #clk{color:var(--clay);text-shadow:0 0 8px var(--ring)}
+/* ── motion layer ── */
+.mbtn,.newchat,.chip,.send{will-change:transform}
+.mbtn:active,.chip:active,.newchat:active{transform:scale(.95)}
+button.send:active{transform:scale(.88)}
+.you .body{animation:slideL .3s cubic-bezier(.2,.8,.3,1.1)}
+@keyframes slideL{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
+.bot{animation:slideR .32s cubic-bezier(.2,.8,.3,1.1)}
+@keyframes slideR{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+.bot .who::before{animation:avpop .4s cubic-bezier(.3,1.6,.4,1)}
+@keyframes avpop{from{transform:scale(0) rotate(-90deg)}to{transform:none}}
+.typing{display:inline-flex;gap:4px;align-items:center;padding:4px 0}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--clay);display:block;
+animation:bounce 1.2s ease-in-out infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-6px);opacity:1}}
+.done-glow .body{animation:donepulse 1s ease}
+@keyframes donepulse{0%{box-shadow:0 0 0 0 rgba(123,191,126,.55)}100%{box-shadow:0 0 0 14px rgba(123,191,126,0)}}
+.conf{position:absolute;width:7px;height:7px;border-radius:2px;pointer-events:none;
+animation:confl .9s ease-out forwards;z-index:60}
+@keyframes confl{0%{opacity:1;transform:translate(0,0) rotate(0)}
+100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(540deg)}}
+.mrow{animation:fade .35s ease backwards}
+.mrow:nth-child(1){animation-delay:.03s}.mrow:nth-child(2){animation-delay:.08s}
+.mrow:nth-child(3){animation-delay:.13s}.mrow:nth-child(4){animation-delay:.18s}
+.htop{animation:fade .35s ease backwards}
+.htop:nth-child(1){animation-delay:.03s}.htop:nth-child(2){animation-delay:.07s}
+.htop:nth-child(3){animation-delay:.11s}.htop:nth-child(4){animation-delay:.15s}
+.chat-it{animation:fade .25s ease}
 @media(max-width:720px){aside{display:none}}
 </style></head><body>
 <aside>
@@ -335,7 +399,17 @@ box-shadow:0 6px 18px var(--ring);transition:transform .15s,box-shadow .2s}
   <select id=model title="quick switch"></select>
   <button class=mbtn id=mopen>⚙ Models</button>
   <button class=mbtn id=sopen>☰ Settings</button>
+  <button class=mbtn id=copen>⌥ Code</button>
+  <span id=clk title="local time"></span>
 </header>
+<div id=wsbar>
+  <span class=wslab>⌥ CODE MODE</span>
+  <input id=wspath placeholder="workspace folder, e.g. ~/Developer/my-app">
+  <button class=mbtn id=wsset>set</button>
+  <button class=mbtn id=wstree>📁 files</button>
+  <span class=ds id=wscur></span>
+</div>
+<div id=wstreebox></div>
 <div class=warnbar id=warn>No local model is running — click <b id=warnopen>⚙ Models</b> for one-click guided setup. Chat works in limited offline mode until then.</div>
 <div id=log><div class=wrap id=stream></div></div>
 <div class=overlay id=ob><div class="panel obpanel" style="text-align:center">
@@ -483,7 +557,7 @@ async function send(t){if(busy||(!t.trim()&&!img))return;busy=true;go.disabled=t
   im.style.cssText='display:block;max-width:220px;border-radius:10px;margin-top:8px';
   body.appendChild(im)}
  inp.value='';inp.style.height='auto';
- const b=add('bot','');b.innerHTML='<span class=think>thinking…</span>';
+ const b=add('bot','');b.innerHTML='<span class=typing><i></i><i></i><i></i></span>';
  try{const r=await (await fetch('/api/send',{method:'POST',
   headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,image:img,image_name:imgName})})).json();
   img=null;imgName='';imgURL='';chip.style.display='none';file.value='';
@@ -493,8 +567,18 @@ async function send(t){if(busy||(!t.trim()&&!img))return;busy=true;go.disabled=t
    b.appendChild(im)}}
  catch(e){b.innerHTML='<span class=think>error: '+e+'</span>'}
  busy=false;go.disabled=false;inp.focus();
+ if(/^(applied|built|created|wrote|imported|removed|saved|switched|renamed|workspace set)/.test(r.reply||'')){
+  const m=b.closest('.msg');m.classList.add('done-glow');celebrate(b)}
  const d=await (await fetch('/api/chats')).json();renderChats(d);
  log.scrollTop=log.scrollHeight}
+function celebrate(el){const r=el.getBoundingClientRect();
+ const cols=['#d97757','#7bbf7e','#a64dff','#05d9e8','#ffd700'];
+ for(let i=0;i<14;i++){const p=document.createElement('span');p.className='conf';
+  p.style.left=(r.left+20+Math.random()*120)+'px';p.style.top=(r.top+8)+'px';
+  p.style.background=cols[i%cols.length];
+  p.style.setProperty('--dx',(Math.random()*140-70)+'px');
+  p.style.setProperty('--dy',(40+Math.random()*90)+'px');
+  document.body.appendChild(p);setTimeout(()=>p.remove(),950)}}
 go.onclick=()=>send(inp.value);
 inp.addEventListener('keydown',e=>{if(e.key=='Enter'&&!e.shiftKey){e.preventDefault();send(inp.value)}});
 inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=inp.scrollHeight+'px'});
@@ -593,5 +677,34 @@ document.getElementById('schatclr').onclick=async()=>{if(!confirm('Delete ALL co
  document.getElementById('smemout').textContent='all chats cleared'};
 document.getElementById('shask').onclick=()=>{ss.classList.remove('open');
  send("what are termind's limitations?")};
+/* clock */
+const clk=document.getElementById('clk');
+setInterval(()=>{const d=new Date();
+ clk.textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+ clk.title=d.toDateString()},1000);
+/* code mode */
+const wsbar=document.getElementById('wsbar'),wsbox=document.getElementById('wstreebox'),
+wspath=document.getElementById('wspath'),wscur=document.getElementById('wscur');
+document.getElementById('copen').onclick=()=>{wsbar.classList.toggle('on');
+ if(!wsbar.classList.contains('on'))wsbox.classList.remove('on');
+ else refreshWs()};
+async function refreshWs(){const d=await (await fetch('/api/ws',{method:'POST',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'tree'})})).json();
+ wscur.textContent=d.workspace;renderTree(d.tree)}
+function renderTree(t){wsbox.innerHTML='';t.forEach(e=>{const d=document.createElement('div');
+ d.className='tre'+(e.dir?' dir':'');
+ d.textContent='  '.repeat(e.depth)+(e.dir?'📁 ':'· ')+e.path.split('/').pop();
+ if(!e.dir)d.onclick=async()=>{const r=await (await fetch('/api/ws',{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'read',path:e.path})})).json();
+  add('bot','`'+r.path+'`\n```\n'+r.content.slice(0,4000)+'\n```');wsbox.classList.remove('on')};
+ wsbox.appendChild(d)})}
+document.getElementById('wsset').onclick=async()=>{const r=await (await fetch('/api/ws',
+ {method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({op:'set',path:wspath.value||'.'})})).json();
+ add('bot',r.reply);celebrate(document.querySelector('#stream .msg:last-child .body')||document.body);
+ refreshWs()};
+document.getElementById('wstree').onclick=()=>{wsbox.classList.toggle('on');
+ if(wsbox.classList.contains('on'))refreshWs()};
+wspath.addEventListener('keydown',e=>{if(e.key=='Enter')document.getElementById('wsset').click()});
 state();loadChats();loadProfile();inp.focus();
 </script></body></html>"""

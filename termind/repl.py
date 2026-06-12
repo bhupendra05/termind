@@ -971,6 +971,59 @@ class Session:
         return (f"applied {' → '.join(applied)}\nsaved: {out_path} "
                 f"({img.width}x{img.height}) — it's now the active image")
 
+    # ── code mode: workspace, file tree, file reading ────────────────────────
+    def set_workspace(self, path: str) -> str:
+        full = os.path.abspath(os.path.expanduser(path.strip() or "."))
+        if not os.path.isdir(full):
+            return f"not a folder: {full}"
+        self.store["workspace"] = full
+        store_save(self.store)
+        os.chdir(full)              # builds/writes/actions now happen here
+        return f"workspace set: {full} — builds, files and commands run here now"
+
+    def workspace(self) -> str:
+        ws = self.store.get("workspace")
+        if ws and os.path.isdir(ws):
+            return ws
+        return os.getcwd()
+
+    def ws_tree(self, max_entries: int = 200) -> list:
+        """A compact file tree of the workspace (depth 3, junk dirs skipped)."""
+        from .indexer import SKIP_DIRS
+        root = self.workspace()
+        out = []
+        for dirpath, dirs, files in os.walk(root):
+            rel = os.path.relpath(dirpath, root)
+            depth = 0 if rel == "." else rel.count(os.sep) + 1
+            if depth >= 3:
+                dirs[:] = []
+                continue
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+            for d in dirs:
+                out.append({"path": os.path.join("" if rel == "." else rel, d),
+                            "dir": True, "depth": depth})
+            for f in sorted(files):
+                if f.startswith("."):
+                    continue
+                out.append({"path": os.path.join("" if rel == "." else rel, f),
+                            "dir": False, "depth": depth})
+            if len(out) >= max_entries:
+                break
+        return out[:max_entries]
+
+    def ws_read(self, rel: str) -> str:
+        full = os.path.abspath(os.path.join(self.workspace(), rel))
+        if not full.startswith(self.workspace()):
+            return "(outside the workspace)"
+        if not os.path.isfile(full):
+            return f"(no such file: {rel})"
+        try:
+            with open(full, "r", encoding="utf-8", errors="ignore") as f:
+                txt = f.read(20000)
+        except OSError as e:
+            return f"(can't read: {e})"
+        return txt or "(empty file)"
+
     # ── profile, settings, memory tools, support bot ─────────────────────────
     def profile(self) -> dict:
         p = self.store.get("profile") or {}
@@ -1236,6 +1289,18 @@ class Session:
                 return "usage: /chat new · /chat <n> · /chat delete <n>"
             self.chat_open(cid)
             return f"resumed: {self.store['chats'][cid]['title']} ({len(self.history)} messages)"
+        if line.startswith("/ws"):
+            return self.set_workspace(line[3:].strip() or ".")
+        if line.startswith("/tree"):
+            t = self.ws_tree()
+            if not t:
+                return f"(empty) workspace: {self.workspace()}"
+            return f"workspace: {self.workspace()}\n" + "\n".join(
+                "  " * e["depth"] + ("📁 " if e["dir"] else "· ") + os.path.basename(e["path"])
+                for e in t[:60])
+        if line.startswith("/read"):
+            p = line[5:].strip()
+            return self.ws_read(p) if p else "usage: /read <file in workspace>"
         if line.startswith("/profile"):
             p = self.profile()
             return (f"name: {p['name'] or '(not set)'} · role: {p['role'] or '-'} · "
@@ -1326,6 +1391,8 @@ class Session:
             return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith(("/chats", "/chat")):
             return _panel("SESSIONS", out.replace("\n", f"\n{CY}│{N} "), CY)
+        if s.startswith(("/ws", "/tree", "/read")):
+            return _panel("WORKSPACE", out.replace("\n", f"\n{CY}│{N} "), CY)
         if s.startswith(("/guide", "/profile")):
             return _panel("HANDBOOK", out.replace("\n", f"\n{GR}│{N} "), GR)
         if s.startswith(("/img", "/edit")):
