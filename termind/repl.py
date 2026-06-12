@@ -786,6 +786,23 @@ class Session:
                 return quad                            # unverified but best evidence we have
         return None
 
+    def _erase(self, img, bbox):
+        """Erase a region — generative LaMa when available (photo-quality reconstruction),
+        classical cv2 as the fallback. Downloads LaMa once with your consent."""
+        from . import inpaint
+        try:
+            if not inpaint.model_ready():
+                ans = self._confirm("  download the neural inpainter for photo-quality "
+                                    "removal? (~200MB, one-time) [y/N] ")
+                if str(ans).strip().lower() == "y":
+                    with Thinking("downloading LaMa inpainter (one-time)"):
+                        inpaint.download_model()
+            if inpaint.model_ready():
+                return inpaint.inpaint_bbox(img, bbox)
+        except Exception:
+            pass                                     # any LaMa trouble → classical fallback
+        return self._inpaint_region(img, bbox)
+
     @staticmethod
     def _inpaint_region(img, bbox):
         """Erase a region and reconstruct it from its surroundings (OpenCV inpainting)."""
@@ -869,7 +886,7 @@ class Session:
                             f"(e.g. 'top right corner') and I'll erase it there.")
                 self._pending_remove = None
                 with Thinking(f"erasing '{val}'"):
-                    img = self._inpaint_region(img, bbox).convert("RGBA")
+                    img = self._erase(img, bbox).convert("RGBA")
                     # post-check: still visible? expand the region 15% and erase again
                     still = self._ask_image(img, 'Reply EXACTLY {"present": true} or '
                                             '{"present": false}.',
@@ -879,7 +896,7 @@ class Session:
                         gy = (bbox[3] - bbox[1]) * 0.15
                         bigger = (max(0, bbox[0] - gx), max(0, bbox[1] - gy),
                                   min(100, bbox[2] + gx), min(100, bbox[3] + gy))
-                        img = self._inpaint_region(img, bigger).convert("RGBA")
+                        img = self._erase(img, bigger).convert("RGBA")
                 applied.append(f"removed '{val}'")
                 continue
             if o == "rembg":               # neural background removal, fully local

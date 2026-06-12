@@ -665,3 +665,53 @@ def test_send_me_image_returns_real_image():
 
 def test_no_fabricated_actions_in_system_prompt():
     assert "NEVER claim you performed an action" in _session().chat_messages("x")[0]["content"]
+
+
+def test_lama_crop_window_math():
+    from termind.inpaint import crop_window
+    l, t, r, b = crop_window(2000, 1000, (1500, 100, 1700, 300))   # small box, big image
+    assert r - l == b - t                                          # square
+    assert l <= 1500 and r >= 1700 and t <= 100 and b >= 300       # contains the hole
+    assert 0 <= l and r <= 2000 and 0 <= t and b <= 1000           # inside the image
+    l, t, r, b = crop_window(400, 300, (10, 10, 390, 290))         # huge box, small image
+    assert 0 <= l and r <= 400 and 0 <= t and b <= 300
+
+
+def test_removal_falls_back_to_cv2_without_lama(tmp_path, monkeypatch):
+    """No LaMa model in the test home → classical inpaint still works (no prompt hang)."""
+    pytest.importorskip("cv2")
+    import base64, io, json as _json
+    import termind.repl as r
+    from PIL import Image, ImageDraw
+    monkeypatch.chdir(tmp_path)
+    img = Image.new("RGB", (200, 200), (200, 30, 30))
+    ImageDraw.Draw(img).rectangle([150, 0, 200, 50], fill=(0, 0, 0))
+    buf = io.BytesIO(); img.save(buf, "PNG")
+    monkeypatch.setattr(r, "chat", lambda msgs, **k: _json.dumps({"present": False}))
+    s = r.Session(live=True)
+    s._confirm = lambda _p="": "n"                                  # decline the download
+    s.last_image = ("p.png", base64.b64encode(buf.getvalue()).decode())
+    out = s.do_edit("remove the logo in the top right corner")
+    assert "removed" in out
+
+
+def test_lama_inpaint_live(tmp_path, monkeypatch):
+    """Runs only when the real LaMa model is downloaded (~/.termind/models)."""
+    import os
+    home = os.path.expanduser("~/.termind")
+    if not os.path.isfile(os.path.join(home, "models", "lama_fp32.onnx")):
+        pytest.skip("LaMa model not downloaded")
+    monkeypatch.setenv("TERMIND_HOME", home)
+    import importlib
+    import termind.inpaint as ip
+    importlib.reload(ip)
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (640, 480), (90, 140, 90))
+    d = ImageDraw.Draw(img)
+    for y in range(0, 480, 16):                       # textured background
+        d.line([(0, y), (640, y + 30)], fill=(70 + y % 60, 120, 80), width=3)
+    d.rectangle([260, 180, 380, 300], fill=(0, 0, 0))  # the "object"
+    out = ip.inpaint_bbox(img, (40.6, 37.5, 59.4, 62.5))
+    px = out.getpixel((320, 240))
+    assert sum(px) > 150                               # hole reconstructed, not black
+    assert out.size == img.size

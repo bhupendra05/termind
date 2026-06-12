@@ -219,3 +219,28 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a before/after pair of the same poster image — left has a black "LOGO" box in its top-right corner circled by a clay-orange dashed ring; right shows the identical poster with the logo seamlessly gone. Between them a chat bubble: **"remove the logo in the top right corner"** with an arrow. Below, three small step chips: "trust the user's words" → "yes/no visual search" → "inpaint + self-check". Top headline in bold charcoal: **"Erase anything. By sentence. Locally."** Subtitle: "termind v0.8 · prompted object removal · $0 · nothing leaves your machine." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.9 — Photo-quality object removal (LaMa)
+
+### 📣 Post
+
+> **First version: erasing a knife from a photo left a rainbow smear. Now it's seamless. The difference: a generative inpainting model — running 100% locally.**
+>
+> termind v0.9 upgrades object removal from "smear the surroundings" to "reconstruct what was behind":
+>
+> 🧠 **LaMa inpainting, on-device** — the same class of model behind pro photo editors' "magic eraser", running through ONNX on your own machine. ~200MB, downloaded once with your consent, never phones home.
+> 🎯 Same conversation flow: "remove the knife" → locate (your words > visual search > verified bbox) → generative erase → self-check.
+> 🛡️ Graceful ladder: LaMa when available, classical OpenCV as fallback, consent before any download.
+> 🔬 The bug hunt was the fun part: exact masks failed because resize anti-aliasing leaks object edges to the model — dilating the mask ~3% fixed it. Pixel-verified before/after.
+>
+> Local. Private. $0. 69 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #ComputerVision #ImageEditing #ONNX #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a dramatic before/after split of one photo — left half shows an object circled with an ugly rainbow smear labeled "classical inpainting", right half the same scene perfectly clean labeled "LaMa · generative, local". A chat bubble above: **"remove the knife"**. Small badges: "~200MB, one-time" · "ONNX on-device" · "never phones home". Top headline in bold charcoal: **"Magic eraser. No cloud."** Subtitle: "termind v0.9 · generative inpainting · local Gemma locates · LaMa reconstructs." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
