@@ -61,12 +61,14 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(400, json.dumps({"error": "bad json"}))
         if self.path == "/api/send":
             text = (req.get("text") or "").strip()
-            if not text:
+            image = req.get("image") or None          # base64 (no data: prefix)
+            if not text and not image:
                 return self._send(200, json.dumps({"reply": ""}))
             with self.session._lock:  # one model call at a time → consistent shared memory
                 try:
                     # web has no stdin, so consent-gated actions auto-approve in the UI flow
-                    out = self.session.handle_web(text)
+                    out = self.session.handle_web(text, image=image,
+                                                  image_name=req.get("image_name") or "image")
                 except SystemExit:
                     out = "__EXIT__"
                 except Exception as e:
@@ -181,8 +183,15 @@ button.send:hover{background:var(--clay2)}button.send:disabled{opacity:.4;cursor
 </header>
 <div id=log><div class=wrap id=stream></div></div>
 <footer>
+  <div id=imgchip style="max-width:760px;margin:0 auto 6px;display:none;align-items:center;gap:8px;color:var(--dim);font-size:12px">
+    <img id=imgprev style="height:42px;border-radius:8px;border:1px solid var(--line)"/>
+    <span id=imgname></span>
+    <span style="cursor:pointer;color:var(--clay)" id=imgx>✕</span>
+  </div>
   <div class=inbar>
-    <textarea id=in rows=1 placeholder="Message termind…"></textarea>
+    <button class=send id=att title="attach image" style="background:var(--card);color:var(--dim);border:1px solid var(--line)">📎</button>
+    <input type=file id=file accept="image/*" style="display:none">
+    <textarea id=in rows=1 placeholder="Message termind…  (📎 to add an image)"></textarea>
     <button class=send id=go>↑</button>
   </div>
   <div class=hint>Enter to send · Shift+Enter for newline · shares its brain with your terminal</div>
@@ -206,7 +215,8 @@ function greet(){stream.innerHTML='<div class=greet><h1>How can I help?</h1>'+
 '<div>your private local agent — it remembers you</div><div class=chips>'+
 '<span class=chip>who am i?</span><span class=chip>/status</span>'+
 '<span class=chip>create a new project: a python dice roller</span>'+
-'<span class=chip>/think design a caching layer</span></div></div>'}
+'<span class=chip>/think design a caching layer</span></div>'+
+'<div style=margin-top:10px;font-size:12px>📎 attach an image — your local model can see it</div></div>'}
 function renderChats(d){chatsEl.innerHTML='';
  d.chats.forEach(c=>{const e=document.createElement('div');
  e.className='chat-it'+(c.active?' active':'');e.textContent=c.title;
@@ -228,12 +238,25 @@ sel.onchange=async()=>{const b=await (await fetch('/api/model',{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value})})).json();
  add('bot',b.reply);state()}
 document.getElementById('new').onclick=()=>chatOp({op:'new'});
-let busy=false;
-async function send(t){if(busy||!t.trim())return;busy=true;go.disabled=true;add('you',t);
+let busy=false,img=null,imgName='',imgURL='';
+const att=document.getElementById('att'),file=document.getElementById('file'),
+chip=document.getElementById('imgchip'),prev=document.getElementById('imgprev'),
+iname=document.getElementById('imgname');
+att.onclick=()=>file.click();
+file.onchange=()=>{const f=file.files[0];if(!f)return;const rd=new FileReader();
+ rd.onload=()=>{imgURL=rd.result;img=imgURL.split(',')[1];imgName=f.name;
+ prev.src=imgURL;iname.textContent=f.name;chip.style.display='flex'};rd.readAsDataURL(f)};
+document.getElementById('imgx').onclick=()=>{img=null;imgName='';imgURL='';chip.style.display='none';file.value=''};
+async function send(t){if(busy||(!t.trim()&&!img))return;busy=true;go.disabled=true;
+ const body=add('you',t||'(image)');
+ if(imgURL){const im=document.createElement('img');im.src=imgURL;
+  im.style.cssText='display:block;max-width:220px;border-radius:10px;margin-top:8px';
+  body.appendChild(im)}
  inp.value='';inp.style.height='auto';
  const b=add('bot','');b.innerHTML='<span class=think>thinking…</span>';
  try{const r=await (await fetch('/api/send',{method:'POST',
-  headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})})).json();
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,image:img,image_name:imgName})})).json();
+  img=null;imgName='';imgURL='';chip.style.display='none';file.value='';
   b.innerHTML=r.reply=='__EXIT__'?'<span class=think>session closed.</span>':fmt(r.reply||'(no output)');}
  catch(e){b.innerHTML='<span class=think>error: '+e+'</span>'}
  busy=false;go.disabled=false;inp.focus();

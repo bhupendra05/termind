@@ -377,3 +377,57 @@ def test_web_chats_api(monkeypatch):
     d2 = json.loads(urllib.request.urlopen(req, timeout=3).read())
     assert d2["messages"] == [] and len(d2["chats"]) == 2
     httpd.server_close()
+
+
+def test_vision_sends_image_to_model(monkeypatch):
+    import termind.repl as r
+    seen = {}
+    def fake_chat(msgs, **k):
+        seen["images"] = msgs[-1].get("images")
+        return "a neon terminal screenshot"
+    monkeypatch.setattr(r, "chat", fake_chat)
+    s = r.Session(live=True)
+    out = s.do_vision("what is this?", "QkFTRTY0", "shot.png")
+    assert out == "a neon terminal screenshot"
+    assert seen["images"] == ["QkFTRTY0"]                      # Ollama multimodal format
+    assert any("[sent image: shot.png]" in m["content"] for m in s.history)
+
+
+def test_vision_needs_live_model():
+    assert "needs a live model" in _session().do_vision("x", "QkFTRTY0")
+
+
+def test_edit_requires_image_first():
+    assert "no image yet" in _session().handle("/edit grayscale")
+
+
+def test_edit_grayscale_and_resize(tmp_path, monkeypatch):
+    PIL = pytest.importorskip("PIL")
+    import base64, io
+    from PIL import Image
+    monkeypatch.chdir(tmp_path)
+    buf = io.BytesIO()
+    Image.new("RGB", (100, 60), (255, 0, 0)).save(buf, "PNG")
+    s = _session()
+    s.last_image = ("red.png", base64.b64encode(buf.getvalue()).decode())
+    out = s.handle("/edit resize 50%")
+    assert "saved:" in out and (tmp_path / "red_edited.png").exists()
+    from PIL import Image as I2
+    assert I2.open(tmp_path / "red_edited.png").size == (50, 30)
+    assert "saved:" in s.handle("/edit grayscale")             # chains on the edited image
+
+
+def test_web_send_image(monkeypatch):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    monkeypatch.setattr(r, "chat", lambda msgs, **k: "I see a red square")
+    s = r.Session(live=True)
+    httpd, url = serve(s, port=8803, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    req = urllib.request.Request(url + "/api/send",
+        data=json.dumps({"text": "", "image": "QkFTRTY0", "image_name": "sq.png"}).encode(),
+        headers={"Content-Type": "application/json"})
+    rep = json.loads(urllib.request.urlopen(req, timeout=5).read())
+    assert "red square" in rep["reply"]
+    httpd.server_close()

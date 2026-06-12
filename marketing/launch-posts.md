@@ -142,3 +142,28 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a large browser window in a warm dark-grey (#262624) Claude-style chat UI: left sidebar with a "✚ New chat" button and a list of conversation titles (one highlighted), main pane with rounded user bubbles and plain assistant replies, a clay-orange accent (#d97757) send button, and a model dropdown in the header. A small badge over the sidebar reads **"continue any conversation."** Top headline in bold charcoal: **"Your local agent, now with sessions."** Subtitle: "termind v0.5 · Claude-style UI · one brain with your terminal · private · $0/query." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.6 — Vision: it can see your images now
+
+### 📣 Post
+
+> **termind v0.6 — I dropped a screenshot into my local agent and it told me what's in it. No cloud. No upload. The image never left my Mac.**
+>
+> 📎 **Image upload in the web UI** — attach a photo, screenshot, or diagram; the local model (Gemma 3 is multimodal out of the box — also llava, llama3.2-vision, moondream via /pull) describes it, answers questions about it, reads text in it.
+> 🖥️ **Terminal too** — `/img screenshot.png what's the error in this?`
+> ✂️ **Local image editing** — `/edit grayscale` · `/edit rotate 90` · `/edit resize 50%` · `/edit flip` — deterministic Pillow edits, chainable, saved next to your file.
+> 🧠 Vision chats land in the same shared sessions as everything else.
+>
+> Honest note: Ollama doesn't run generative image editors — these are real, local, predictable edits plus genuine visual understanding. When local image-gen gets good, it slots right in.
+>
+> Private · $0/query · sandboxed on AION · 49 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #Ollama #Gemma #Vision #Multimodal #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the warm-grey Claude-style termind chat window; in it, a user bubble containing a small photo thumbnail of a red circle with a 📎 icon, and below it the assistant reply: **"Red circle. Simple. Precise."** A side ribbon shows three mini edit chips: "grayscale", "rotate 90", "resize 50%" with before/after mini-thumbnails. A lock badge reads "image never leaves your machine." Top headline in bold charcoal: **"Your local agent can see now."** Subtitle: "termind v0.6 · image upload · Gemma 3 vision · local edits · private · $0/query." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

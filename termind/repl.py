@@ -77,6 +77,8 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/write <file> <spec>{N} {D}» generate one file (preview + y/N){N}
 {CY}║{N}  {GR}◉{N} {WH}/mkdir <path>{N}  {D}» create folder{N}   {GR}◉{N} {WH}/code <path>{N}  {D}» open VS Code{N}
 {CY}║{N}  {PK}◆{N} {WH}or just say it{N}  {D}» "create a folder x" · "build a tool that…"{N}
+{CY}║{N}  {GR}◉{N} {WH}/img <path> [q]{N}  {D}»{N} the model SEES your image (gemma3/llava)
+{CY}║{N}  {GR}◉{N} {WH}/edit <op>{N}       {D}»{N} grayscale · rotate 90 · resize 50% · flip
 {CY}║{N}  {GR}◉{N} {WH}/chats{N} {D}» past conversations{N}  {GR}◉{N} {WH}/chat new{N} {D}» fresh chat{N}
 {CY}║{N}  {GR}◉{N} {WH}/model [name]{N}    {D}»{N} list · switch your brain (any Ollama model)
 {CY}║{N}  {GR}◉{N} {WH}/pull <name>{N}     {D}»{N} download a new model (llama3.2, qwen2.5…)
@@ -207,6 +209,7 @@ class Session:
         self.history = list(self.store["chats"].get(cid, {}).get("messages", [])) \
             if cid else list(self.store["history"])
         self.actions = 0
+        self.last_image = None       # (name, base64) of the most recent image, for /edit
 
     # ── chat sessions: new chat, continue previous, switch ───────────────────
     def _new_chat_id(self) -> str:
@@ -550,13 +553,83 @@ class Session:
         return [{"role": "system", "content": sys}] + self.history[-8:] + [
             {"role": "user", "content": text}]
 
+    # ── vision: see and edit images ───────────────────────────────────────────
+    def do_vision(self, text: str, image_b64: str, name: str = "image") -> str:
+        """Send an image to the model (Ollama multimodal: gemma3, llava, llama3.2-vision…)."""
+        if not self.live:
+            return "image understanding needs a live model — install Ollama (./setup.sh)"
+        self.last_image = (name, image_b64)
+        msgs = self.chat_messages(text or "Describe this image.")
+        msgs[-1]["images"] = [image_b64]              # Ollama's multimodal message format
+        with Thinking("looking at your image"):
+            try:
+                reply = self._chat(msgs)
+            except RuntimeError as e:
+                return (f"{e}\nTip: your model may not support vision — try "
+                        f"/pull llava  or  /pull llama3.2-vision, then /model it.")
+        self.history += [{"role": "user", "content": f"[sent image: {name}] {text}".strip()},
+                         {"role": "assistant", "content": reply}]
+        self.store["history"] = self.history[-20:]
+        self._save_chat(f"image: {name}")
+        store_save(self.store)
+        return reply
+
+    def do_img(self, arg: str) -> str:
+        """Terminal: /img <path> [question]."""
+        parts = arg.split(None, 1)
+        path = os.path.expanduser(parts[0]) if parts else ""
+        if not path or not os.path.isfile(path):
+            return "usage: /img <image path> [question]"
+        import base64
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        return self.do_vision(parts[1] if len(parts) > 1 else "", b64,
+                              os.path.basename(path))
+
+    def do_edit(self, op: str) -> str:
+        """Basic local image edits on the last image: grayscale · rotate <deg> ·
+        resize <pct>% · flip. (Generative editing isn't supported by Ollama — this is
+        real, local, deterministic editing via Pillow.)"""
+        if not self.last_image:
+            return "no image yet — send one first (web 📎 or /img <path>)"
+        try:
+            from PIL import Image, ImageOps
+        except ImportError:
+            return "image editing needs Pillow — run: pip install pillow"
+        import base64
+        import io
+        name, b64 = self.last_image
+        img = Image.open(io.BytesIO(base64.b64decode(b64)))
+        low = op.lower()
+        m = re.search(r"-?\d+", low)
+        if "gray" in low or "grey" in low or "b&w" in low:
+            img = ImageOps.grayscale(img)
+        elif "rotate" in low:
+            img = img.rotate(-(int(m.group()) if m else 90), expand=True)
+        elif "resize" in low or "scale" in low:
+            pct = (int(m.group()) if m else 50) / 100
+            img = img.resize((max(1, int(img.width * pct)), max(1, int(img.height * pct))))
+        elif "flip" in low:
+            img = ImageOps.mirror(img)
+        else:
+            return "edits: grayscale · rotate <deg> · resize <pct>% · flip"
+        out_path = os.path.join(os.getcwd(), os.path.splitext(name)[0] + "_edited.png")
+        img.save(out_path, "PNG")
+        with open(out_path, "rb") as f:
+            self.last_image = (os.path.basename(out_path),
+                               base64.b64encode(f.read()).decode())
+        self.actions += 1
+        return f"saved: {out_path} ({img.width}x{img.height}) — it's now the active image"
+
     def do_model(self, name: str = "") -> str:
         if not name:
             installed = list_models()
             rows = [("★ " if m.split(":")[0] == self.model.split(":")[0] else "  ") + m
                     for m in installed] or ["  (none pulled yet — try: /pull gemma3)"]
             return ("active: " + self.model + "\n" + "\n".join(rows)
-                    + "\nswitch: /model <name> · download: /pull <name>")
+                    + "\nswitch: /model <name> · download: /pull <name>"
+                    + "\nvision: gemma3 (built-in) · /pull llava · /pull llama3.2-vision"
+                    + " · /pull moondream")
         if not model_available(name):
             return f"'{name}' isn't pulled yet — run: /pull {name}"
         self.model = name
@@ -627,6 +700,10 @@ class Session:
         if line.startswith("/think"):
             q = line[6:].strip()
             return self.do_think(q) if q else "usage: /think <hard question>"
+        if line.startswith("/img"):
+            return self.do_img(line[4:].strip())
+        if line.startswith("/edit"):
+            return self.do_edit(line[5:].strip())
         if line.startswith("/chats"):
             rows = self.chats_list()
             if not rows:
@@ -670,13 +747,15 @@ class Session:
             return f"unknown command {line.split()[0]} — try /help"
         return self.route(line)  # plain english: action if it sounds like one, else chat
 
-    def handle_web(self, line: str) -> str:
+    def handle_web(self, line: str, image: str = None, image_name: str = "image") -> str:
         """Same agent, driven from the web UI. There's no stdin, so a user's message IS the
         consent for the action it requested (file/project writes auto-approve; VS Code can't
         open from a server context, so build skips the editor step)."""
         prev = self._confirm
         self._confirm = lambda _p="": "y"   # the send itself is the y/N
         try:
+            if image:
+                return self.do_vision(line, image, image_name)
             if line.strip().lower().startswith(("/build", "create", "make", "build", "new")) \
                     and "project" in line.lower() or line.strip().startswith("/build"):
                 idea = line.split(None, 1)[1] if line.strip().startswith("/build") else line
@@ -709,6 +788,8 @@ class Session:
             return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith(("/chats", "/chat")):
             return _panel("SESSIONS", out.replace("\n", f"\n{CY}│{N} "), CY)
+        if s.startswith(("/img", "/edit")):
+            return _panel("VISION", out.replace("\n", f"\n{PK}│{N} "), PK)
         if s.startswith("/do"):
             return _panel("OPERATOR", out.replace("\n", f"\n{YL}│{N} "), YL)
         if s.startswith(("/build", "/write", "/mkdir", "/code")):
