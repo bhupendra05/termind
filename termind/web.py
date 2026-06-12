@@ -73,7 +73,11 @@ class _Handler(BaseHTTPRequestHandler):
                     out = "__EXIT__"
                 except Exception as e:
                     out = f"error: {e}"
-            return self._send(200, json.dumps({"reply": _strip_ansi(out)}))
+            resp = {"reply": _strip_ansi(out)}
+            # an edit happened → send the result image back so the user SEES it
+            if out.startswith("applied") and self.session.last_image:
+                resp["image"] = self.session.last_image[1]
+            return self._send(200, json.dumps(resp))
         if self.path == "/api/chat":
             s = self.session
             with s._lock:
@@ -257,7 +261,10 @@ async function send(t){if(busy||(!t.trim()&&!img))return;busy=true;go.disabled=t
  try{const r=await (await fetch('/api/send',{method:'POST',
   headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,image:img,image_name:imgName})})).json();
   img=null;imgName='';imgURL='';chip.style.display='none';file.value='';
-  b.innerHTML=r.reply=='__EXIT__'?'<span class=think>session closed.</span>':fmt(r.reply||'(no output)');}
+  b.innerHTML=r.reply=='__EXIT__'?'<span class=think>session closed.</span>':fmt(r.reply||'(no output)');
+  if(r.image){const im=document.createElement('img');im.src='data:image/png;base64,'+r.image;
+   im.style.cssText='display:block;max-width:320px;border-radius:10px;margin-top:10px;background:repeating-conic-gradient(#444 0 25%,#555 0 50%) 0 0/16px 16px';
+   b.appendChild(im)}}
  catch(e){b.innerHTML='<span class=think>error: '+e+'</span>'}
  busy=false;go.disabled=false;inp.focus();
  const d=await (await fetch('/api/chats')).json();renderChats(d);

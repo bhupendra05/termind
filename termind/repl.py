@@ -34,6 +34,14 @@ AUTO_FACT = re.compile(
 ACTION_HINT = re.compile(
     r"\b(create|make|build|scaffold|new|open|write|generate)\b[\s\S]*"
     r"\b(folder|directory|project|tool|app|file|script|code|vs ?code|editor)\b", re.I)
+# Edit-intent: "remove the background", "make it brighter", "rotate it", "edit this photo"…
+# routes straight to the edit engine instead of vision-Q&A or chat.
+EDIT_HINT = re.compile(
+    r"\b(remove|change|delete|erase)\s+(the\s+)?(background|bg)\b"
+    r"|\b(grayscale|greyscale|b&w|black and white|sepia|rotate|resize|crop|flip|sharpen|blur)\b"
+    r"|\bmake\s+(it|this|the\s+(image|photo|picture))\b.*\b(bright|dark|sharp|big|small|square)"
+    r"|\bedit\s+(this|the|that)\s+(image|photo|picture)\b", re.I)
+
 INTENT_SYS = (
     'Classify the user\'s request. Reply with EXACTLY one JSON object:\n'
     '{"intent": "mkdir|open_editor|write_file|build_project|chat",'
@@ -493,6 +501,8 @@ class Session:
         return self.do_chat(text)
 
     def route(self, text: str) -> str:
+        if self.last_image and EDIT_HINT.search(text):
+            return self.do_edit(text)                 # "rotate it 90" etc. → edit engine
         return self.do_intent(text) if ACTION_HINT.search(text) else self.do_chat(text)
 
     def do_action(self, task: str, confirm=None) -> str:
@@ -543,7 +553,10 @@ class Session:
         sys = ("You are termind, a private local AI agent running in the user's terminal. "
                "The HUMAN typing to you is your user — a separate person, not you. "
                "Be concise and direct. ALWAYS honor the user's stated preferences "
-               "(answer length, tone, style) in every reply.")
+               "(answer length, tone, style) in every reply. You are NOT text-only: you can "
+               "SEE images the user attaches, and the app EDITS images on request (background "
+               "removal, brightness, contrast, crop, rotate, resize, sepia, blur…). If asked "
+               "whether you can edit an image, say yes and ask what edit they want.")
         if self.store["facts"]:
             sys += (" Facts the USER has told you about THEMSELVES (when they ask 'who am I' "
                     "or about their identity, answer from these): "
@@ -627,6 +640,7 @@ class Session:
         val = float(num.group()) if num else None
         KEYS = [("remove background", [("rembg", None)]), ("bg remove", [("rembg", None)]),
                 ("gray", [("grayscale", None)]), ("grey", [("grayscale", None)]),
+                ("black and white", [("grayscale", None)]), ("monochrome", [("grayscale", None)]),
                 ("b&w", [("grayscale", None)]), ("sepia", [("sepia", None)]),
                 ("rotate", [("rotate", val)]), ("resize", [("resize", val)]),
                 ("scale", [("resize", val)]), ("flip", [("flip", None)]),
@@ -822,7 +836,13 @@ class Session:
         self._confirm = lambda _p="": "y"   # the send itself is the y/N
         try:
             if image:
+                # an attached image + an edit request = edit it, don't describe it
+                if EDIT_HINT.search(line or ""):
+                    self.last_image = (image_name, image)
+                    return self.do_edit(line)
                 return self.do_vision(line, image, image_name)
+            if self.last_image and EDIT_HINT.search(line) and not line.startswith("/"):
+                return self.do_edit(line)             # edit the previously sent image
             if line.strip().lower().startswith(("/build", "create", "make", "build", "new")) \
                     and "project" in line.lower() or line.strip().startswith("/build"):
                 idea = line.split(None, 1)[1] if line.strip().startswith("/build") else line

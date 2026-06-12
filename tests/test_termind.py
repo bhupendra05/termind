@@ -483,3 +483,36 @@ def test_edit_remove_background_live(tmp_path, monkeypatch):
     s.last_image = ("circ.png", _png_b64((255, 0, 0), (64, 64)))
     out = s.handle("/edit remove background")
     assert "applied rembg" in out and (tmp_path / "circ_edited.png").exists()
+
+
+def test_attached_image_with_edit_request_edits_not_describes(tmp_path, monkeypatch):
+    """THE screenshot bug: image + 'remove background' must EDIT, not describe."""
+    pytest.importorskip("rembg")
+    monkeypatch.chdir(tmp_path)
+    s = _session()
+    out = s.handle_web("remove background", image=_png_b64((0, 200, 0), (48, 48)),
+                       image_name="logo.png")
+    assert out.startswith("applied rembg") and (tmp_path / "logo_edited.png").exists()
+
+
+def test_edit_phrase_after_image_routes_to_edit(tmp_path, monkeypatch):
+    pytest.importorskip("PIL")
+    monkeypatch.chdir(tmp_path)
+    s = _session()
+    s.last_image = ("p.png", _png_b64())
+    out = s.handle("make it black and white")          # plain chat phrasing, no slash
+    assert out.startswith("applied") and "grayscale" in out
+
+
+def test_capability_awareness_in_system_prompt():
+    sysmsg = _session().chat_messages("can you edit images?")[0]["content"]
+    assert "NOT text-only" in sysmsg and "EDITS images" in sysmsg
+
+
+def test_attached_image_with_question_still_describes(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "a green square")
+    s = r.Session(live=True)
+    out = s.handle_web("what is in this image?", image=_png_b64((0, 200, 0)),
+                       image_name="sq.png")
+    assert out == "a green square"                     # questions still go to vision
