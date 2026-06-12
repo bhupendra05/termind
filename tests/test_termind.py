@@ -516,3 +516,118 @@ def test_attached_image_with_question_still_describes(monkeypatch):
     out = s.handle_web("what is in this image?", image=_png_b64((0, 200, 0)),
                        image_name="sq.png")
     assert out == "a green square"                     # questions still go to vision
+
+
+def test_object_removal_parsing():
+    s = _session()
+    assert s._parse_edit_ops("remove the gemini logo from my image") == \
+        [("removeobj", "gemini logo")]
+    assert s._parse_edit_ops("erase the watermark") == [("removeobj", "watermark")]
+    assert s._parse_edit_ops("remove background")[0][0] == "rembg"   # bg still → rembg
+
+
+def test_edit_hint_matches_object_removal():
+    from termind.repl import EDIT_HINT
+    assert EDIT_HINT.search("remove the gemini logo from my image")
+    assert EDIT_HINT.search("erase the text in the corner")
+
+
+def test_object_removal_inpaints_only_that_region(tmp_path, monkeypatch):
+    pytest.importorskip("cv2")
+    import base64, io, json as _json
+    import termind.repl as r
+    from PIL import Image, ImageDraw
+    monkeypatch.chdir(tmp_path)
+    img = Image.new("RGB", (100, 100), (200, 30, 30))           # red field…
+    ImageDraw.Draw(img).rectangle([35, 35, 65, 65], fill=(0, 0, 0))  # …with a black "logo"
+    buf = io.BytesIO(); img.save(buf, "PNG")
+    def vlm(msgs, **k):                                          # dispatch like a real VLM
+        sysmsg = msgs[0]["content"]
+        user = msgs[-1]["content"]
+        if "contain" in user:                                    # quadrant descent: center obj
+            return _json.dumps({"present": True})                # in all quads → falls through
+        if "still visible" in user:
+            return _json.dumps({"present": False})
+        if "present" in sysmsg:
+            return _json.dumps({"present": True})
+        return _json.dumps({"found": True, "x1": 35, "y1": 35, "x2": 65, "y2": 65})
+    monkeypatch.setattr(r, "chat", vlm)
+    s = r.Session(live=True)
+    s.last_image = ("ad.png", base64.b64encode(buf.getvalue()).decode())
+    out = s.do_edit("remove the black logo")
+    assert "removed 'black logo'" in out
+    from PIL import Image as I2
+    res = I2.open(tmp_path / "ad_edited.png").convert("RGB")
+    cx = res.getpixel((50, 50))
+    assert cx[0] > 120 and cx[1] < 90                            # center is red-ish, not black
+    assert res.getpixel((5, 5))[0] > 150                         # corners untouched
+
+
+def test_object_removal_not_found(monkeypatch, tmp_path):
+    pytest.importorskip("cv2")
+    import json as _json
+    import termind.repl as r
+    monkeypatch.chdir(tmp_path)
+    def vlm(msgs, **k):
+        sysmsg = msgs[0]["content"]
+        if "present" in sysmsg:
+            return _json.dumps({"present": False})
+        return _json.dumps({"found": False})
+    monkeypatch.setattr(r, "chat", vlm)
+    s = r.Session(live=True)
+    s.last_image = ("x.png", _png_b64())
+    assert "couldn't locate" in s.do_edit("remove the unicorn")
+
+
+def test_quadrant_descent_when_bbox_lies(tmp_path, monkeypatch):
+    """Direct bbox is WRONG → quadrant yes/no search finds the true region."""
+    pytest.importorskip("cv2")
+    import base64, io, json as _json
+    import termind.repl as r
+    from PIL import Image, ImageDraw
+    monkeypatch.chdir(tmp_path)
+    img = Image.new("RGB", (200, 200), (200, 30, 30))
+    ImageDraw.Draw(img).rectangle([150, 0, 200, 50], fill=(0, 0, 0))  # logo in D1 (top-right)
+    buf = io.BytesIO(); img.save(buf, "PNG")
+    import re as _re
+    def vlm(msgs, **k):
+        user = msgs[-1]["content"]
+        if "contain" in user:        # answer truthfully based on the crop's actual pixels
+            import io as _io
+            from PIL import Image as _I
+            crop = _I.open(_io.BytesIO(base64.b64decode(msgs[-1]["images"][0]))).convert("RGB")
+            dark = any(sum(crop.getpixel((x, y))) < 90
+                       for x in range(0, crop.width, 7) for y in range(0, crop.height, 7))
+            return _json.dumps({"present": dark})
+        if "still visible" in user:
+            return _json.dumps({"present": False})
+        if "present" in msgs[0]["content"]:
+            return _json.dumps({"present": True})
+        return _json.dumps({"found": True, "x1": 5, "y1": 60, "x2": 25, "y2": 90})  # wrong box
+    monkeypatch.setattr(r, "chat", vlm)
+    s = r.Session(live=True)
+    s.last_image = ("p.png", base64.b64encode(buf.getvalue()).decode())
+    out = s.do_edit("remove the black logo")
+    assert "removed" in out
+    from PIL import Image as I2
+    res = I2.open(tmp_path / "p_edited.png").convert("RGB")
+    assert res.getpixel((180, 20))[0] > 100              # logo region reconstructed (red-ish)
+
+
+def test_user_position_words_win(tmp_path, monkeypatch):
+    """'in the top right corner' must be used directly — zero VLM geometry involved."""
+    pytest.importorskip("cv2")
+    import base64, io, json as _json
+    import termind.repl as r
+    from PIL import Image, ImageDraw
+    monkeypatch.chdir(tmp_path)
+    img = Image.new("RGB", (200, 200), (200, 30, 30))
+    ImageDraw.Draw(img).rectangle([150, 0, 200, 50], fill=(0, 0, 0))
+    buf = io.BytesIO(); img.save(buf, "PNG")
+    monkeypatch.setattr(r, "chat", lambda msgs, **k: _json.dumps({"present": False}))
+    s = r.Session(live=True)
+    s.last_image = ("p.png", base64.b64encode(buf.getvalue()).decode())
+    out = s.do_edit("remove the logo in the top right corner")
+    assert "removed" in out
+    from PIL import Image as I2
+    assert I2.open(tmp_path / "p_edited.png").convert("RGB").getpixel((180, 20))[0] > 100

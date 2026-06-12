@@ -34,13 +34,29 @@ AUTO_FACT = re.compile(
 ACTION_HINT = re.compile(
     r"\b(create|make|build|scaffold|new|open|write|generate)\b[\s\S]*"
     r"\b(folder|directory|project|tool|app|file|script|code|vs ?code|editor)\b", re.I)
-# Edit-intent: "remove the background", "make it brighter", "rotate it", "edit this photo"…
+# Edit-intent: "remove the background", "remove the logo", "make it brighter", "rotate it"…
 # routes straight to the edit engine instead of vision-Q&A or chat.
 EDIT_HINT = re.compile(
     r"\b(remove|change|delete|erase)\s+(the\s+)?(background|bg)\b"
+    r"|\b(remove|erase|delete)\s+(the\s+)?\S+"          # "remove the <anything>" (image in play)
     r"|\b(grayscale|greyscale|b&w|black and white|sepia|rotate|resize|crop|flip|sharpen|blur)\b"
     r"|\bmake\s+(it|this|the\s+(image|photo|picture))\b.*\b(bright|dark|sharp|big|small|square)"
     r"|\bedit\s+(this|the|that)\s+(image|photo|picture)\b", re.I)
+
+# "remove/erase the <object>" (but NOT the background — that's rembg's job).
+# Position words ("in the top right") are KEPT — they localize deterministically.
+OBJ_REMOVE = re.compile(
+    r"\b(?:remove|erase|delete)\s+(?:the\s+)?(?!background\b|bg\b)"
+    r"([\w][\w\s''&.-]{1,80}?)(?:\s+from\b.*)?$", re.I)
+
+# Map "top right corner", "bottom left", "center"… to a region in percent coords.
+POSITIONS = [
+    (("top", "right"), (50, 0, 100, 50)), (("top", "left"), (0, 0, 50, 50)),
+    (("bottom", "right"), (50, 50, 100, 100)), (("bottom", "left"), (0, 50, 50, 100)),
+    (("top",), (0, 0, 100, 45)), (("bottom",), (0, 55, 100, 100)),
+    (("left",), (0, 0, 45, 100)), (("right",), (55, 0, 100, 100)),
+    (("center",), (25, 25, 75, 75)), (("middle",), (25, 25, 75, 75)),
+]
 
 INTENT_SYS = (
     'Classify the user\'s request. Reply with EXACTLY one JSON object:\n'
@@ -600,8 +616,8 @@ class Session:
                               os.path.basename(path))
 
     EDIT_OPS = ("grayscale · sepia · rotate <deg> · resize <pct>% · flip · brightness <pct> · "
-                "contrast <pct> · blur <px> · sharpen · crop square · remove background — "
-                "or just describe it: 'make it brighter and b&w'")
+                "contrast <pct> · blur <px> · sharpen · crop square · remove background · "
+                "remove the <object> — or just describe it: 'make it brighter and b&w'")
 
     @staticmethod
     def _apply_edit(img, op: str, val: float = None):
@@ -633,9 +649,138 @@ class Session:
             return img.crop((left, top, left + side, top + side))
         return img
 
+    @staticmethod
+    def _img_b64(img) -> str:
+        import base64
+        import io
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, "PNG")
+        return base64.b64encode(buf.getvalue()).decode()
+
+    def _ask_image(self, img, system: str, user: str) -> dict:
+        return parse_action(self._chat(
+            [{"role": "system", "content": system},
+             {"role": "user", "content": user, "images": [self._img_b64(img)]}],
+            fmt_json=True))
+
+    def _verify_region(self, img, bbox, target: str) -> bool:
+        """Crop the candidate box and ask the model if the target is really in it."""
+        w, h = img.size
+        crop = img.crop((int(bbox[0] / 100 * w), int(bbox[1] / 100 * h),
+                         int(bbox[2] / 100 * w), int(bbox[3] / 100 * h)))
+        ans = self._ask_image(crop, 'Reply EXACTLY {"present": true} or {"present": false}.',
+                              f"Is the {target} visible in this image?")
+        return bool(ans.get("present"))
+
+    def _grid_locate(self, img, target: str):
+        """Grid voting: small VLMs are bad at pixel coords but good at 'which cells?'."""
+        GRID = 4
+        ans = self._ask_image(
+            img,
+            f"The image is divided into a {GRID}x{GRID} grid. Columns are A,B,C,D from LEFT "
+            f"to RIGHT; rows are 1,2,3,4 from TOP to BOTTOM (A1 = top-left). Reply EXACTLY "
+            f'{{"cells": ["<col><row>", ...]}} listing every cell containing the target, '
+            f'or {{"cells": []}} if absent.',
+            f"Which cells contain the {target}?")
+        cells = [str(c).strip().upper() for c in (ans.get("cells") or [])]
+        cols = [ord(c[0]) - 65 for c in cells if len(c) >= 2 and c[0] in "ABCD"
+                and c[1] in "1234"]
+        rows = [int(c[1]) - 1 for c in cells if len(c) >= 2 and c[0] in "ABCD"
+                and c[1] in "1234"]
+        if not cols:
+            return None
+        step = 100.0 / GRID
+        return (min(cols) * step, min(rows) * step,
+                (max(cols) + 1) * step, (max(rows) + 1) * step)
+
+    @staticmethod
+    def _position_region(text: str):
+        """If the USER said where ('in the top right'), trust them — deterministic region."""
+        low = text.lower()
+        for words, region in POSITIONS:
+            if all(w in low for w in words):
+                return region
+        return None
+
+    def _quadrant_locate(self, img, target: str):
+        """Visual binary search: yes/no presence questions on overlapping crops — the one
+        geometry task small VLMs are actually reliable at."""
+        region = (0.0, 0.0, 100.0, 100.0)
+        w, h = img.size
+        for _depth in range(2):                       # 2 levels: 100% → 50% → 25% region
+            x1, y1, x2, y2 = region
+            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+            ov_x, ov_y = (x2 - x1) * 0.10, (y2 - y1) * 0.10   # 10% overlap between quads
+            quads = [(x1, y1, mx + ov_x, my + ov_y), (mx - ov_x, y1, x2, my + ov_y),
+                     (x1, my - ov_y, mx + ov_x, y2), (mx - ov_x, my - ov_y, x2, y2)]
+            hits = []
+            for q in quads:
+                crop = img.crop((int(q[0] / 100 * w), int(q[1] / 100 * h),
+                                 int(q[2] / 100 * w), int(q[3] / 100 * h)))
+                ans = self._ask_image(
+                    crop, 'Answer strictly. Reply EXACTLY {"present": true} or '
+                          '{"present": false}.',
+                    f"Does this image contain the {target} (fully or partially)?")
+                if ans.get("present"):
+                    hits.append(q)
+            if not hits or len(hits) == 4:            # nowhere / everywhere → stop here
+                return region if _depth > 0 else None
+            region = (min(q[0] for q in hits), min(q[1] for q in hits),
+                      max(q[2] for q in hits), max(q[3] for q in hits))
+        return region
+
+    def _find_region(self, img, target: str):
+        """Locate the target: the user's own position words first (deterministic), then
+        visual binary search (yes/no on crops), then direct bbox — verified when possible."""
+        pos = self._position_region(target)
+        if pos:
+            return pos                                # the user said where — believe them
+        with Thinking(f"locating '{target}'"):
+            quad = self._quadrant_locate(img, target)
+            if quad and self._verify_region(img, quad, target):
+                return quad
+            box = self._ask_image(
+                img,
+                'You locate objects in images. Reply EXACTLY {"found": true|false, '
+                '"x1": <0-100>, "y1": <0-100>, "x2": <0-100>, "y2": <0-100>} — PERCENT of '
+                'width/height, top-left origin, tightly around the object.',
+                f"Locate the {target}.")
+            try:
+                if box.get("found"):
+                    x1, y1, x2, y2 = (float(box[k]) for k in ("x1", "y1", "x2", "y2"))
+                    if x2 > x1 and y2 > y1:
+                        cand = (max(0, x1 - 3), max(0, y1 - 3),
+                                min(100, x2 + 3), min(100, y2 + 3))
+                        if self._verify_region(img, cand, target):
+                            return cand
+            except (KeyError, TypeError, ValueError):
+                pass
+            if quad:
+                return quad                            # unverified but best evidence we have
+        return None
+
+    @staticmethod
+    def _inpaint_region(img, bbox):
+        """Erase a region and reconstruct it from its surroundings (OpenCV inpainting)."""
+        import cv2
+        import numpy as np
+        rgb = np.array(img.convert("RGB"))[:, :, ::-1].copy()      # PIL RGB → cv2 BGR
+        h, w = rgb.shape[:2]
+        x1, y1 = int(bbox[0] / 100 * w), int(bbox[1] / 100 * h)
+        x2, y2 = int(bbox[2] / 100 * w), int(bbox[3] / 100 * h)
+        mask = np.zeros((h, w), np.uint8)
+        mask[y1:y2, x1:x2] = 255
+        out = cv2.inpaint(rgb, mask, 7, cv2.INPAINT_TELEA)
+        from PIL import Image
+        return Image.fromarray(out[:, :, ::-1])                     # BGR → RGB → PIL
+
     def _parse_edit_ops(self, text: str) -> list:
         """Map an edit request to [(op, val), …] — keywords first, model for free-form."""
         low = text.lower()
+        if "background" not in low and "bg" not in low.split():
+            m_obj = OBJ_REMOVE.search(text)
+            if m_obj:                                  # "remove the gemini logo" → targeted erase
+                return [("removeobj", m_obj.group(1).strip())]
         num = re.search(r"-?\d+", low)
         val = float(num.group()) if num else None
         KEYS = [("remove background", [("rembg", None)]), ("bg remove", [("rembg", None)]),
@@ -682,6 +827,32 @@ class Session:
         img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGBA")
         applied = []
         for o, val in ops:
+            if o == "removeobj":           # "remove the gemini logo" → locate + inpaint
+                if not self.live:
+                    return "targeted removal needs a live vision model (install Ollama)"
+                try:
+                    import cv2  # noqa: F401
+                except ImportError:
+                    return ("targeted removal needs OpenCV — run: "
+                            "pip install opencv-python-headless numpy")
+                bbox = self._find_region(img, str(val))
+                if not bbox:
+                    return (f"couldn't locate '{val}' — tell me WHERE it is and I'll trust "
+                            f"you, e.g. 'remove the {val} in the top right corner'")
+                with Thinking(f"erasing '{val}'"):
+                    img = self._inpaint_region(img, bbox).convert("RGBA")
+                    # post-check: still visible? expand the region 15% and erase again
+                    still = self._ask_image(img, 'Reply EXACTLY {"present": true} or '
+                                            '{"present": false}.',
+                                            f"Is the {val} still visible in this image?")
+                    if still.get("present"):
+                        gx = (bbox[2] - bbox[0]) * 0.15
+                        gy = (bbox[3] - bbox[1]) * 0.15
+                        bigger = (max(0, bbox[0] - gx), max(0, bbox[1] - gy),
+                                  min(100, bbox[2] + gx), min(100, bbox[3] + gy))
+                        img = self._inpaint_region(img, bigger).convert("RGBA")
+                applied.append(f"removed '{val}'")
+                continue
             if o == "rembg":               # neural background removal, fully local
                 try:
                     from rembg import remove
