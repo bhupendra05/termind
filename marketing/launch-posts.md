@@ -315,3 +315,25 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: three mini termind windows fanned like cards showing the SAME chat in three themes — warm-grey, light, and neon cyberpunk. In front, a welcome card: "▲ welcome to termind — what should I call you?" with a name field reading "XYZ". To the right, a Settings column with small labeled rows: "profile", "theme", "memory: ⬆ import from ChatGPT/Claude", "help & workflows". A chat bubble asks "what are your limitations?" with a grounded answer beneath. Top headline in bold charcoal: **"A local agent with a you-shaped memory."** Subtitle: "termind v0.12 · profiles · themes · memory import · built-in support bot · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.13 — Rename anything, welcome everyone
+
+### 📣 Post
+
+> **termind v0.13 — small release, big feel.**
+>
+> ✏️ **Rename your chats** — pencil icon or double-click any conversation in the sidebar (terminal: /chat rename 2 Sprint Planning). Auto-titles are a start; YOUR titles are better.
+> 🎬 **A real welcome** — onboarding got the hero treatment: floating gradient mark, staggered field animations, one screen that sets your name, style and theme. First impressions matter, even for local tools.
+> 💅 Plus the full design pass that landed this week: glass header, avatar bubbles, animated thinking dots, spring-in modals, custom scrollbars — across dark, light and cyberpunk themes.
+>
+> Local · private · $0 · 88 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #OpenSource #BuildInPublic #DeveloperTools #UIUX
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Left: the termind sidebar with a chat row mid-rename — an inline cursor, a glowing pencil ✎ icon, and the title changing from "knife is in person hands ." to "Image Lab". Right: the new welcome screen as a floating card — gradient ▲ mark hovering, "welcome to termind", name field reading "Bhupendra", three theme swatches. Top headline in bold charcoal: **"The little things make it feel pro."** Subtitle: "termind v0.13 · rename sessions · hero onboarding · three themes · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

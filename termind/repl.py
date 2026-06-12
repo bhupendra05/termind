@@ -285,6 +285,14 @@ class Session:
         store_save(self.store)
         return True
 
+    def chat_rename(self, cid: str, title: str) -> bool:
+        c = self.store["chats"].get(cid)
+        if not c or not title.strip():
+            return False
+        c["title"] = title.strip()[:60]
+        store_save(self.store)
+        return True
+
     def chat_delete(self, cid: str) -> bool:
         if cid not in self.store["chats"]:
             return False
@@ -1203,6 +1211,16 @@ class Session:
             if arg == "new" or not arg:
                 self.chat_new()
                 return "fresh chat started (the old one is saved in /chats)"
+            if arg.split()[0] == "rename":
+                bits = arg.split(None, 2)
+                rows = self.chats_list()
+                try:
+                    row = rows[int(bits[1]) - 1]
+                    new = bits[2]
+                except (ValueError, IndexError):
+                    return "usage: /chat rename <number> <new title>"
+                self.chat_rename(row["id"], new)
+                return f"renamed to: {new.strip()[:60]}"
             if arg.split()[0] in ("delete", "del", "rm"):
                 rows = self.chats_list()
                 try:

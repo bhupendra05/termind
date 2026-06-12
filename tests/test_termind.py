@@ -904,3 +904,38 @@ def test_web_profile_and_memory_endpoints():
     h = json.loads(urllib.request.urlopen(url + "/api/help", timeout=3).read())
     assert "custom model criteria" in h["topics"]
     httpd.server_close()
+
+
+def test_chat_rename_persists():
+    s = _session()
+    s.handle("a conversation about testing")
+    cid = s.chats_list()[0]["id"]
+    assert s.chat_rename(cid, "  My Renamed Chat  ")
+    assert _session().chats_list()[0]["title"] == "My Renamed Chat"   # survives restart
+    assert not s.chat_rename("nope", "x") and not s.chat_rename(cid, "  ")
+
+
+def test_terminal_chat_rename_command():
+    s = _session()
+    s.handle("hello world chat")
+    out = s.handle("/chat rename 1 Sprint Planning")
+    assert "renamed to: Sprint Planning" in out
+    assert s.chats_list()[0]["title"] == "Sprint Planning"
+    assert "usage" in s.handle("/chat rename 99 X")
+
+
+def test_web_chat_rename_endpoint():
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    s = r.Session(live=False)
+    s.handle("rename me please")
+    cid = s.chats_list()[0]["id"]
+    httpd, url = serve(s, port=8813, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    req = urllib.request.Request(url + "/api/chat",
+        data=json.dumps({"op": "rename", "id": cid, "title": "Q3 Roadmap"}).encode(),
+        headers={"Content-Type": "application/json"})
+    d = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    assert d["chats"][0]["title"] == "Q3 Roadmap"
+    httpd.server_close()

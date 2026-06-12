@@ -95,6 +95,8 @@ class _Handler(BaseHTTPRequestHandler):
                     s.chat_open(str(req.get("id", "")))
                 elif req.get("op") == "delete":
                     s.chat_delete(str(req.get("id", "")))
+                elif req.get("op") == "rename":
+                    s.chat_rename(str(req.get("id", "")), str(req.get("title", "")))
             return self._send(200, json.dumps({"chats": s.chats_list(),
                                                "messages": s.history}))
         if self.path == "/api/pull":
@@ -303,6 +305,20 @@ line-height:1.6}
 padding:9px 12px;color:var(--ink);font-family:inherit;font-size:12.5px;outline:none;
 transition:border-color .15s}
 #mspec:focus{border-color:var(--clay)}
+.obpanel{width:480px;padding:34px 36px 28px}
+.obmark{width:58px;height:58px;margin:0 auto 16px;border-radius:17px;display:grid;
+place-items:center;font-size:26px;color:#fff;
+background:linear-gradient(135deg,var(--clay),var(--clay2));
+box-shadow:0 10px 30px var(--ring);animation:bob 3s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.obpanel .sin{text-align:center;margin:5px 0;animation:fade .5s ease backwards}
+.obpanel .sin:nth-of-type(1){animation-delay:.05s}
+.obpanel .sin:nth-of-type(2){animation-delay:.12s}
+.obpanel .sin:nth-of-type(3){animation-delay:.19s}
+#obgo{font-size:14px;border-radius:12px;
+background:linear-gradient(135deg,var(--clay),var(--clay2))!important;
+box-shadow:0 6px 18px var(--ring);transition:transform .15s,box-shadow .2s}
+#obgo:hover{transform:translateY(-2px);box-shadow:0 10px 26px var(--ring);color:#fff}
 @media(max-width:720px){aside{display:none}}
 </style></head><body>
 <aside>
@@ -322,9 +338,10 @@ transition:border-color .15s}
 </header>
 <div class=warnbar id=warn>No local model is running — click <b id=warnopen>⚙ Models</b> for one-click guided setup. Chat works in limited offline mode until then.</div>
 <div id=log><div class=wrap id=stream></div></div>
-<div class=overlay id=ob><div class=panel style="text-align:center">
-  <h2 style="font-size:22px">▲ welcome to termind</h2>
-  <div class=sub>your private local AI — let's set you up (stays on this machine)</div>
+<div class=overlay id=ob><div class="panel obpanel" style="text-align:center">
+  <div class=obmark>▲</div>
+  <h2 style="font-size:24px;letter-spacing:-.4px">welcome to termind</h2>
+  <div class=sub style="font-size:13.5px">your private local AI — chats, builds, sees & remembers.<br>everything stays on this machine. let's set you up.</div>
   <input id=obname class=sin placeholder="what should I call you?" style="text-align:center">
   <input id=obrole class=sin placeholder="what do you do? (optional)" style="text-align:center">
   <input id=obprefs class=sin placeholder="how do you like answers? e.g. short and direct (optional)" style="text-align:center">
@@ -423,11 +440,15 @@ function greet(){stream.innerHTML='<div class=greet><h1>How can I help?</h1>'+
 function renderChats(d){chatsEl.innerHTML='';
  d.chats.forEach(c=>{const e=document.createElement('div');
  e.className='chat-it'+(c.active?' active':'');
- e.innerHTML='<span class=tt></span><span class=del title="delete chat">✕</span>';
+ e.innerHTML='<span class=tt></span><span class=del title="rename chat">✎</span><span class=del title="delete chat">✕</span>';
  e.querySelector('.tt').textContent=c.title;
  if(c.active)titleEl.textContent=c.title;
  e.querySelector('.tt').onclick=()=>chatOp({op:'open',id:c.id});
- e.querySelector('.del').onclick=(ev)=>{ev.stopPropagation();
+ const rn=(ev)=>{ev.stopPropagation();const t=prompt('Rename chat:',c.title);
+  if(t&&t.trim())chatOp({op:'rename',id:c.id,title:t.trim()})};
+ e.querySelectorAll('.del')[0].onclick=rn;
+ e.querySelector('.tt').ondblclick=rn;
+ e.querySelectorAll('.del')[1].onclick=(ev)=>{ev.stopPropagation();
   if(confirm('Delete "'+c.title+'"? This cannot be undone.'))chatOp({op:'delete',id:c.id})};
  chatsEl.appendChild(e)});}
 function renderMsgs(ms){stream.innerHTML='';if(!ms.length){greet();return}
