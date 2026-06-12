@@ -1115,3 +1115,71 @@ def test_mode_ui_and_profile_chip_served():
     from termind.web import PAGE
     assert all(k in PAGE for k in ("data-m=plan", "data-m=act", "data-m=bypass",
                                    "mecard", "meav", "/api/mode"))
+
+
+def test_per_session_workspaces(tmp_path):
+    s = _session()
+    a, b = tmp_path / "proj-a", tmp_path / "proj-b"
+    a.mkdir(); b.mkdir()
+    s.chat_new(mode="code"); s.set_workspace(str(a))
+    cid_a = s.store["active_chat"]
+    s.chat_new(mode="code"); s.set_workspace(str(b))
+    assert s.workspace() == str(b)
+    s.chat_open(cid_a)
+    assert s.workspace() == str(a)                       # follows the session
+    s2 = _session()
+    assert s2.workspace() == str(a)                      # persists with active chat
+
+
+def test_code_agent_actually_executes(tmp_path, monkeypatch):
+    """THE transcript bug: 'create a calculator website' must CREATE, not advise."""
+    import json as _json
+    import termind.repl as r
+    seq = iter([
+        _json.dumps({"tool": "mkdir", "path": "calculator"}),
+        _json.dumps({"tool": "write", "path": "calculator/index.html",
+                     "content": "<html><body>calc</body></html>"}),
+        _json.dumps({"tool": "run", "cmd": "echo deployed"}),
+        _json.dumps({"tool": "done", "say": "calculator website ready"}),
+    ])
+    monkeypatch.setattr(r, "chat", lambda *a, **k: next(seq))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s.handle_web("create a website for calculator")
+    assert (tmp_path / "calculator" / "index.html").read_text().startswith("<html>")
+    assert "mkdir" in out and "write" in out and "deployed" in out
+    assert "calculator website ready" in out
+    assert any("calculator" in m["content"] for m in s.history)   # saved to session
+
+
+def test_code_agent_plan_mode_does_nothing(tmp_path, monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "1. would create calculator/")
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    s.set_mode("plan")
+    out = s.handle_web("create a website for calculator")
+    assert out.startswith("📋") and not (tmp_path / "calculator").exists()
+    s.set_mode("act")
+
+
+def test_agent_write_rejects_broken_python_and_escapes(tmp_path):
+    s = _session()
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    assert "REJECTED" in s._agent_write("x.py", "def broken(:")
+    assert not (tmp_path / "x.py").exists()
+    assert "⛔" in s._agent_write("../evil.txt", "x")
+    assert "wrote ok.py" in s._agent_write("ok.py", "a = 1")
+
+
+def test_chats_api_reports_workspace(tmp_path):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    s = r.Session(live=False)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path))
+    httpd, url = serve(s, port=8819, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(url + "/api/chats?mode=code", timeout=3).read())
+    assert d["workspace"] == str(tmp_path) and d["has_ws"] is True
+    httpd.server_close()

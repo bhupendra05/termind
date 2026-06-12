@@ -54,6 +54,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({
                 "chats": s.chats_list(mode),
                 "active_mode": s.active_mode(),
+                "workspace": s.workspace(),
+                "has_ws": bool((s.store["chats"].get(s.store.get("active_chat") or "")
+                                or {}).get("ws")),
                 "messages": s.history,            # messages of the active chat
             }))
         if self.path == "/api/catalog":
@@ -105,6 +108,9 @@ class _Handler(BaseHTTPRequestHandler):
                     s.chat_rename(str(req.get("id", "")), str(req.get("title", "")))
             return self._send(200, json.dumps({
                 "chats": s.chats_list(str(req.get("mode")) if req.get("mode") else None),
+                "workspace": s.workspace(),
+                "has_ws": bool((s.store["chats"].get(s.store.get("active_chat") or "")
+                                or {}).get("ws")),
                 "messages": s.history}))
         if self.path == "/api/pull":
             out = self.session.start_pull(str(req.get("model", "")).strip())
@@ -587,7 +593,8 @@ function renderChats(d){chatsEl.innerHTML='';
  d.chats.forEach(c=>{const e=document.createElement('div');
  e.className='chat-it'+(c.active?' active':'');
  e.innerHTML='<span class=tt></span><span class=del title="rename chat">✎</span><span class=del title="delete chat">✕</span>';
- e.querySelector('.tt').textContent=c.title;
+ e.querySelector('.tt').textContent=(c.ws?'📂 ':'')+c.title;
+ if(c.ws)e.title=c.ws;
  if(c.active)titleEl.textContent=c.title;
  e.querySelector('.tt').onclick=()=>chatOp({op:'open',id:c.id});
  const rn=(ev)=>{ev.stopPropagation();const t=prompt('Rename chat:',c.title);
@@ -601,9 +608,12 @@ function renderMsgs(ms){stream.innerHTML='';if(!ms.length){greet();return}
  ms.forEach(m=>add(m.role=='user'?'you':'bot',m.content))}
 async function chatOp(body){body.mode=view;const d=await (await fetch('/api/chat',{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
- renderChats(d);renderMsgs(d.messages);if(body.op=='new')titleEl.textContent='New chat'}
+ renderChats(d);renderMsgs(d.messages);if(body.op=='new')titleEl.textContent='New chat';
+ if(d.workspace)wscur.textContent=d.workspace;
+ if(view=='code'&&body.op=='new'&&!d.has_ws){fp.classList.add('open');browse('')}
+ if(view=='code')refreshWs()}
 async function loadChats(){const d=await (await fetch('/api/chats?mode='+view)).json();
- renderChats(d);renderMsgs(d.messages)}
+ renderChats(d);renderMsgs(d.messages);if(d.workspace)wscur.textContent=d.workspace}
 async function state(){const s=await (await fetch('/api/state')).json();
  ver.textContent='v'+s.version;
  core.innerHTML='<span class="dot '+(s.live?'live':'off')+'"></span>'+(s.live?s.model:'offline');

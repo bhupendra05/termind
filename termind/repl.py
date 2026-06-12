@@ -289,6 +289,8 @@ class Session:
         self.store["active_chat"] = cid
         self.history = list(c.get("messages", []))
         store_save(self.store)
+        if c.get("ws") and os.path.isdir(c["ws"]):
+            os.chdir(c["ws"])                   # session switch → its workspace
         return True
 
     def chat_rename(self, cid: str, title: str) -> bool:
@@ -318,7 +320,7 @@ class Session:
     def chats_list(self, mode: str = None) -> list:
         items = sorted(self.store["chats"].items(), key=lambda kv: -kv[1].get("ts", 0))
         return [{"id": k, "title": v.get("title", "Chat"),
-                 "mode": v.get("mode", "chat"),
+                 "mode": v.get("mode", "chat"), "ws": v.get("ws"),
                  "active": k == self.store.get("active_chat")} for k, v in items
                 if mode is None or v.get("mode", "chat") == mode]
 
@@ -601,12 +603,16 @@ class Session:
         return None
 
     def _code_route(self, text: str):
-        """Code-mode extras: file edits by name, and the plan-mode gate."""
+        """Code sessions: every plain message goes through the tool-execution loop."""
+        in_code = getattr(self, "view_mode", "chat") == "code" or self.active_mode() == "code"
         m = EDIT_FILE.match(text)
         if m and os.path.isfile(os.path.join(self.workspace(), m.group(1))):
             return self.do_edit_file(m.group(1), m.group(2) or "improve it")
-        if self.agent_mode == "plan" and (ACTION_HINT.search(text) or EDIT_FILE.match(text)):
+        if in_code and self.agent_mode == "plan" and (ACTION_HINT.search(text)
+                                                      or EDIT_FILE.match(text)):
             return self.do_plan(text)
+        if in_code and self.live and not text.startswith("/"):
+            return self.do_code_agent(text)        # ACT, don't advise
         return None
 
     def route(self, text: str) -> str:
@@ -1006,6 +1012,104 @@ class Session:
         return (f"applied {' → '.join(applied)}\nsaved: {out_path} "
                 f"({img.width}x{img.height}) — it's now the active image")
 
+    # ── the CODE AGENT: a tool-execution loop (mkdir/write/read/run/done) ────
+    CODE_SYS = (
+        "You are termind's CODE AGENT working inside the workspace: {ws}\n"
+        "You ACT by replying with EXACTLY ONE JSON object per turn — never prose, never "
+        "shell-command advice:\n"
+        '{{"tool":"mkdir","path":"<relative folder>"}}\n'
+        '{{"tool":"write","path":"<relative file>","content":"<FULL file content>"}}\n'
+        '{{"tool":"read","path":"<relative file>"}}\n'
+        '{{"tool":"run","cmd":"<shell command, runs inside the workspace>"}}\n'
+        '{{"tool":"done","say":"<short summary for the user>"}}  when the task is complete\n'
+        '{{"tool":"say","say":"<reply>"}}  only for pure conversation/questions\n'
+        "Multi-file tasks: ONE tool call per turn, then wait for the RESULT. A build task is "
+        "NOT done until every file is WRITTEN with the write tool — after mkdir, immediately "
+        "write the files. If the user says 'yes', 'do it', 'run it' — CONTINUE with tools.")
+
+    def do_code_agent(self, text: str) -> str:
+        """Code-session messages go through a real act-observe loop: the model calls
+        tools, termind EXECUTES them, results feed back. No more command-printing."""
+        if self.agent_mode == "plan":
+            return self.do_plan(text)
+        sys_p = self.CODE_SYS.format(ws=self.workspace())
+        msgs = [{"role": "system", "content": sys_p}] + self.history[-8:] + [
+            {"role": "user", "content": text}]
+        log = []
+        final = None
+        nudges = 0
+        for _ in range(12):
+            with Thinking("code agent working"):
+                act = parse_action(self._chat(msgs, fmt_json=True))
+            tool = str(act.get("tool", "")).lower()
+            if tool in ("done", "say") or ("say" in act and not tool):
+                wrote = any(line.startswith("✓ write") for line in log)
+                buildish = re.search(r"\b(create|build|make|website|project|app|tool|script)\b",
+                                     text, re.I)
+                if not wrote and buildish and nudges < 2:   # stopped before writing files?
+                    nudges += 1
+                    msgs += [{"role": "assistant", "content": json.dumps(act)},
+                             {"role": "user", "content":
+                              "RESULT: no files have been written yet — the task is not done. "
+                              "Continue NOW with the next tool call (write the files)."}]
+                    continue
+                final = str(act.get("say") or "done.")
+                break
+            if tool == "mkdir":
+                res = self.do_mkdir(str(act.get("path", "")))
+            elif tool == "write":
+                res = self._agent_write(str(act.get("path", "")),
+                                        str(act.get("content", "")))
+            elif tool == "read":
+                res = self.ws_read(str(act.get("path", "")))[:2000]
+            elif tool == "run":
+                res = self._agent_run(str(act.get("cmd", "")))
+            else:
+                res = f"unknown tool: {tool or act}"
+            short = res.split("\n")[0][:110]
+            log.append(("✓ " if not short.startswith(("⛔", "(", "can'")) else "") +
+                       f"{tool} → {short}")
+            msgs += [{"role": "assistant", "content": json.dumps(act)},
+                     {"role": "user", "content": "RESULT: " + res[:2000]}]
+        if final is None:
+            final = "(step limit reached — say 'continue' to keep going)"
+        out = ("\n".join(log) + ("\n\n" if log else "")) + final
+        self.history += [{"role": "user", "content": text},
+                         {"role": "assistant", "content": final}]
+        self.store["history"] = self.history[-20:]
+        self._save_chat(text)
+        store_save(self.store)
+        return out
+
+    def _agent_write(self, rel: str, content: str) -> str:
+        full = self._safe_path(rel)
+        if full is None:
+            return f"⛔ blocked: '{rel}' is outside the workspace"
+        if not rel.strip():
+            return "(write needs a path)"
+        content = self._strip_fences(content) if content.lstrip().startswith("```") else content
+        if rel.endswith(".py"):
+            err = self._py_error(rel, content)
+            if err:
+                return f"REJECTED — python syntax error ({err}); send a corrected write"
+        os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(content if content.endswith("\n") else content + "\n")
+        self.actions += 1
+        return f"wrote {rel} ({len(content.splitlines())} lines)"
+
+    def _agent_run(self, cmd: str) -> str:
+        checked = self._dry_run(cmd)
+        if not checked:
+            return f"can't run — '{cmd.split()[0] if cmd.split() else cmd}' not found"
+        try:
+            res = subprocess.run(checked, shell=True, cwd=self.workspace(),
+                                 capture_output=True, text=True, timeout=60)
+            self.actions += 1
+            return f"$ {checked}\n" + (res.stdout or res.stderr or "(no output)")[:1200]
+        except subprocess.TimeoutExpired:
+            return "command timed out (60s)"
+
     # ── agent modes: plan / act / bypass ─────────────────────────────────────
     @property
     def agent_mode(self) -> str:
@@ -1090,12 +1194,18 @@ class Session:
         full = os.path.abspath(os.path.expanduser(path.strip() or "."))
         if not os.path.isdir(full):
             return f"not a folder: {full}"
-        self.store["workspace"] = full
+        c = self.store["chats"].get(self.store.get("active_chat") or "")
+        if c is not None and c.get("mode") == "code":
+            c["ws"] = full                      # THIS session's folder
+        self.store["workspace"] = full          # global fallback for new sessions
         store_save(self.store)
         os.chdir(full)              # builds/writes/actions now happen here
         return f"workspace set: {full} — builds, files and commands run here now"
 
     def workspace(self) -> str:
+        c = self.store["chats"].get(self.store.get("active_chat") or "")
+        if c and c.get("mode") == "code" and c.get("ws") and os.path.isdir(c["ws"]):
+            return c["ws"]                      # per-session workspace wins
         ws = self.store.get("workspace")
         if ws and os.path.isdir(ws):
             return ws

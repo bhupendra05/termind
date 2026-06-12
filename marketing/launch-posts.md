@@ -416,3 +416,27 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind code view; the workspace bar shows three mode pills — "📋 plan", "▶ act" (lit clay), "⚡ bypass" — beside a path pill "~/Developer/my-app". In the chat: "fix app.py: handle the null case" → "edited app.py (±12 lines) ✓" with a small confetti burst. Around the workspace, a subtle glowing fence/border with a ⛔ badge stopping an arrow labeled "../escape". Bottom-left of the sidebar, an avatar chip "B · Bhupendra" with a settings gear hint. Top headline in bold charcoal: **"An agent that edits your code — on a leash you control."** Subtitle: "termind v0.16 · plan / act / bypass · workspace jail · file editing · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.17 — The agent that DOES instead of advises
+
+### 📣 Post
+
+> **The most embarrassing failure mode of local agents: you say "create the project" and the model replies with… a bash tutorial. termind v0.17 kills that forever.**
+>
+> 🛠️ **A real tool-execution loop** — in code sessions the model doesn't chat about commands anymore; it emits structured tool calls (mkdir / write / read / run / done) and termind EXECUTES each one, feeds the result back, and the loop continues. "create a calculator website" → folder created → index.html written → script written → "ready." Files actually on disk.
+> 🧪 Live-tested with the exact conversation that used to fail — gemma3 went from printing echo commands to building the project in 3 tool calls.
+> 🔁 **It pushes itself** — if the model declares "done" before writing any files on a build task, termind nudges it: "no files written — continue." Small models need a manager; now they have one.
+> 📂 **Workspaces per session** — every code session owns its folder; new code session = folder picker opens; switching sessions switches workspaces. Sidebar shows 📂 on each.
+> 🛡️ Same jail, same plan/act/bypass leash, syntax-broken Python writes get REJECTED at the gate.
+>
+> Local · private · $0 · 108 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #ClaudeCode #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Split layout: LEFT, a faded "before" chat where a bot bubble is full of grey bash text labeled "advice 🙄"; RIGHT, the termind code view "after": three crisp executed-step rows — "✓ mkdir calculator", "✓ write index.html (14 lines)", "✓ write calculator.js (10 lines)" — each with green checks, ending in "calculator website ready ✓" with confetti. A small loop diagram above: model → tool call → execute → result → model. Top headline in bold charcoal: **"Agents should DO, not advise."** Subtitle: "termind v0.17 · tool-execution loop · per-session workspaces · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
