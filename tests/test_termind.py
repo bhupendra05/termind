@@ -715,3 +715,64 @@ def test_lama_inpaint_live(tmp_path, monkeypatch):
     px = out.getpixel((320, 240))
     assert sum(px) > 150                               # hole reconstructed, not black
     assert out.size == img.size
+
+
+def test_chat_delete_and_terminal_command():
+    s = _session()
+    s.handle("first conversation here")
+    s.handle("/chat new"); s.handle("second conversation here")
+    assert len(s.chats_list()) == 2
+    out = s.handle("/chat delete 2")                    # delete the older one
+    assert "deleted" in out and len(s.chats_list()) == 1
+    s.handle("/chat delete 1")                          # delete the ACTIVE one
+    assert s.chats_list() == [] and s.history == []
+    s2 = _session()
+    assert s2.chats_list() == []                        # deletion persisted
+
+
+def test_model_catalog_flags_installed(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "list_models", lambda: ["gemma3:latest", "moondream:latest"])
+    cat = _session().model_catalog()
+    flags = {c["name"]: c["installed"] for c in cat["catalog"]}
+    assert flags["gemma3"] and flags["moondream"] and not flags["qwen2.5"]
+    assert cat["pull"]["status"] == "idle"
+
+
+def test_start_pull_state_machine(monkeypatch):
+    import time as _t
+    import termind.repl as r
+    monkeypatch.setattr(r, "pull_stream",
+                        lambda name, cb: (cb(50, "downloading"), cb(100, "success")))
+    s = r.Session(live=True)
+    s.server = True
+    out = s.start_pull("qwen2.5")
+    assert "background" in out
+    for _ in range(50):
+        if s.pull["status"] == "done":
+            break
+        _t.sleep(0.05)
+    assert s.pull == {"status": "done", "name": "qwen2.5", "pct": 100}
+    s.pull = {"status": "pulling", "name": "x"}
+    assert "one at a time" in s.start_pull("y")
+
+
+def test_web_chat_delete_and_catalog(monkeypatch):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    monkeypatch.setattr(r, "list_models", lambda: ["gemma3:latest"])
+    s = r.Session(live=False)
+    s.handle("a chat to delete")
+    cid = s.chats_list()[0]["id"]
+    httpd, url = serve(s, port=8807, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    req = urllib.request.Request(url + "/api/chat",
+        data=json.dumps({"op": "delete", "id": cid}).encode(),
+        headers={"Content-Type": "application/json"})
+    d = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    assert d["chats"] == []
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    c = json.loads(urllib.request.urlopen(url + "/api/catalog", timeout=3).read())
+    assert any(x["name"] == "qwen2.5" for x in c["catalog"]) and "pull" in c
+    httpd.server_close()

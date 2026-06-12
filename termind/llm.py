@@ -17,6 +17,25 @@ def ollama_available() -> bool:
         return False
 
 
+def pull_stream(name: str, on_progress) -> bool:
+    """Download a model via Ollama's streaming API, reporting (pct, stage) as it goes."""
+    req = urllib.request.Request(HOST + "/api/pull",
+                                 data=json.dumps({"model": name}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=7200) as r:  # noqa: S310
+        for line in r:
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            if d.get("error"):
+                raise RuntimeError(d["error"])
+            total, done = d.get("total"), d.get("completed")
+            pct = int(done * 100 / total) if total and done else None
+            on_progress(pct, d.get("status", ""))
+    return True
+
+
 def list_models() -> list:
     """Names of all models pulled on the local Ollama server."""
     try:

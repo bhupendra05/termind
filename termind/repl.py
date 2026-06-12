@@ -21,7 +21,18 @@ from aion import Capabilities, Kernel
 from . import __version__
 from .indexer import index_folder
 from .llm import (MODEL, chat, claude_chat, embed, list_models, model_available,
-                  offline_chat, ollama_available, parse_action)
+                  offline_chat, ollama_available, parse_action, pull_stream)
+
+# Curated model catalog — guidance for "which brain should I download?"
+CATALOG = [
+    ("gemma3", "3.3 GB", "best all-rounder — chat + vision (recommended)"),
+    ("llama3.2", "2.0 GB", "fast, lightweight chat"),
+    ("qwen2.5", "4.7 GB", "strongest at coding"),
+    ("deepseek-r1", "4.7 GB", "deep reasoning & math"),
+    ("moondream", "1.7 GB", "tiny + quick image understanding"),
+    ("mistral", "4.4 GB", "solid general model"),
+    ("llava", "4.7 GB", "dedicated vision model"),
+]
 from .store import load as store_load, save as store_save
 
 # Auto-memory: only when a SENTENCE STARTS with a self-statement — "should i use X?" must
@@ -243,6 +254,7 @@ class Session:
         self.actions = 0
         self.last_image = None       # (name, base64) of the most recent image, for /edit
         self._pending_remove = None  # target of a failed removal awaiting "where is it"
+        self.pull = {"status": "idle"}  # background model download state (web progress bar)
 
     # ── chat sessions: new chat, continue previous, switch ───────────────────
     def _new_chat_id(self) -> str:
@@ -262,6 +274,22 @@ class Session:
             return False
         self.store["active_chat"] = cid
         self.history = list(c.get("messages", []))
+        store_save(self.store)
+        return True
+
+    def chat_delete(self, cid: str) -> bool:
+        if cid not in self.store["chats"]:
+            return False
+        del self.store["chats"][cid]
+        if self.store.get("active_chat") == cid:        # deleted the open one → fall back
+            rest = sorted(self.store["chats"].items(), key=lambda kv: -kv[1].get("ts", 0))
+            if rest:
+                self.chat_open(rest[0][0])
+            else:
+                self.store["active_chat"] = None
+                self.history = []
+        if not self.store["chats"]:
+            self.store["history"] = []   # else the legacy field resurrects a deleted chat
         store_save(self.store)
         return True
 
@@ -924,10 +952,12 @@ class Session:
             installed = list_models()
             rows = [("★ " if m.split(":")[0] == self.model.split(":")[0] else "  ") + m
                     for m in installed] or ["  (none pulled yet — try: /pull gemma3)"]
+            guide = "\n".join(f"  /pull {n:<12} {s:>7} — {d}" for n, s, d in CATALOG
+                              if n.split(":")[0] not in
+                              {m.split(":")[0] for m in installed})
             return ("active: " + self.model + "\n" + "\n".join(rows)
-                    + "\nswitch: /model <name> · download: /pull <name>"
-                    + "\nvision: gemma3 (built-in) · /pull llava · /pull llama3.2-vision"
-                    + " · /pull moondream")
+                    + "\nswitch: /model <name> · sessions: /chats"
+                    + ("\nget more brains (guided):\n" + guide if guide else ""))
         if not model_available(name):
             return f"'{name}' isn't pulled yet — run: /pull {name}"
         self.model = name
@@ -935,6 +965,34 @@ class Session:
         store_save(self.store)
         self.live = self.server and True
         return f"switched to {name} (saved — future sessions use it too)"
+
+    def model_catalog(self) -> dict:
+        """Everything the model manager UI needs: installed, curated catalog, pull state."""
+        installed = list_models()
+        bases = {m.split(":")[0] for m in installed}
+        return {"installed": installed, "active": self.model,
+                "catalog": [{"name": n, "size": s, "desc": d, "installed": n in bases}
+                            for n, s, d in CATALOG],
+                "pull": dict(self.pull), "server": self.server}
+
+    def start_pull(self, name: str) -> str:
+        """Background download with live progress (the web UI polls self.pull)."""
+        if self.pull.get("status") == "pulling":
+            return f"already downloading {self.pull.get('name')} — one at a time"
+        if not self.server:
+            return "Ollama isn't running — install/start it first (./setup.sh)"
+        self.pull = {"status": "pulling", "name": name, "pct": 0, "stage": "starting"}
+
+        def run():
+            try:
+                pull_stream(name, lambda pct, st: self.pull.update(
+                    {"pct": pct if pct is not None else self.pull.get("pct", 0),
+                     "stage": st or self.pull.get("stage", "")}))
+                self.pull = {"status": "done", "name": name, "pct": 100}
+            except Exception as e:
+                self.pull = {"status": "error", "name": name, "error": str(e)[:140]}
+        threading.Thread(target=run, daemon=True).start()
+        return f"downloading {name} in the background — progress shows in ⚙ Models"
 
     def do_pull(self, name: str) -> str:
         if not shutil.which("ollama"):
@@ -1013,11 +1071,19 @@ class Session:
             if arg == "new" or not arg:
                 self.chat_new()
                 return "fresh chat started (the old one is saved in /chats)"
+            if arg.split()[0] in ("delete", "del", "rm"):
+                rows = self.chats_list()
+                try:
+                    row = rows[int(arg.split()[1]) - 1]
+                except (ValueError, IndexError):
+                    return "usage: /chat delete <number from /chats>"
+                self.chat_delete(row["id"])
+                return f"deleted: {row['title']}"
             rows = self.chats_list()
             try:
                 cid = rows[int(arg) - 1]["id"]
             except (ValueError, IndexError):
-                return "usage: /chat new · /chat <number from /chats>"
+                return "usage: /chat new · /chat <n> · /chat delete <n>"
             self.chat_open(cid)
             return f"resumed: {self.store['chats'][cid]['title']} ({len(self.history)} messages)"
         if line.startswith("/model"):

@@ -244,3 +244,26 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a dramatic before/after split of one photo — left half shows an object circled with an ugly rainbow smear labeled "classical inpainting", right half the same scene perfectly clean labeled "LaMa · generative, local". A chat bubble above: **"remove the knife"**. Small badges: "~200MB, one-time" · "ONNX on-device" · "never phones home". Top headline in bold charcoal: **"Magic eraser. No cloud."** Subtitle: "termind v0.9 · generative inpainting · local Gemma locates · LaMa reconstructs." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.10 — The Model Store
+
+### 📣 Post
+
+> **termind v0.10 — downloading a local AI model is now one click. With a progress bar. In your browser. From a store that runs entirely on your machine.**
+>
+> ⚙️ **Models panel** — a curated catalog with honest guidance: what each model is FOR (gemma3 = all-rounder + vision · qwen2.5 = coding · deepseek-r1 = reasoning · moondream = tiny vision) and exactly how big the download is. One click → live progress bar → "use" to switch.
+> 🧭 **Guidance everywhere** — no model installed? A banner walks you to one-click setup. In the terminal, /model now prints the same guided catalog with sizes.
+> 🗑️ **Delete old chats** — hover a conversation in the sidebar → ✕ → gone (with confirm). Terminal: /chat delete <n>. (Found & fixed a fun bug: deleted chats were resurrecting from a legacy history field on restart.)
+> ⬇️ Downloads stream in the background via Ollama's API — keep chatting while a new brain arrives.
+>
+> Local. Private. $0/query. 73 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #Ollama #AgenticAI #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the warm-grey termind web UI with a floating **"⚙ Models"** panel: a list of model cards — "gemma3 · 3.3 GB · all-rounder ✓ active", "qwen2.5 · 4.7 GB · coding ⬇", "deepseek-r1 · 4.7 GB · reasoning ⬇" — and one card mid-download with a glowing clay-to-violet progress bar at 62%. In the sidebar behind, a chat row shows a small ✕ hover-delete. Top headline in bold charcoal: **"An app store for local AI brains."** Subtitle: "termind v0.10 · one-click model downloads · guided · delete old chats · private · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

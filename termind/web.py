@@ -51,6 +51,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "chats": s.chats_list(),
                 "messages": s.history,            # messages of the active chat
             }))
+        if self.path == "/api/catalog":
+            return self._send(200, json.dumps(self.session.model_catalog()))
         return self._send(404, "not found", "text/plain")
 
     def do_POST(self):
@@ -86,8 +88,14 @@ class _Handler(BaseHTTPRequestHandler):
                     s.chat_new()
                 elif req.get("op") == "open":
                     s.chat_open(str(req.get("id", "")))
+                elif req.get("op") == "delete":
+                    s.chat_delete(str(req.get("id", "")))
             return self._send(200, json.dumps({"chats": s.chats_list(),
                                                "messages": s.history}))
+        if self.path == "/api/pull":
+            out = self.session.start_pull(str(req.get("model", "")).strip())
+            return self._send(200, json.dumps({"reply": out,
+                                               "pull": dict(self.session.pull)}))
         if self.path == "/api/model":
             name = (req.get("model") or "").strip()
             with self.session._lock:
@@ -130,6 +138,30 @@ font-family:inherit;transition:background .15s}
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid transparent}
 .chat-it:hover{background:var(--card)}
 .chat-it.active{background:var(--card);border-color:var(--line)}
+.chat-it{display:flex;align-items:center;gap:6px}
+.chat-it .tt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-it .del{display:none;color:var(--dim);padding:0 4px;border-radius:6px;flex:none}
+.chat-it:hover .del{display:block}.chat-it .del:hover{color:var(--clay)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
+align-items:center;justify-content:center;z-index:50}
+.overlay.open{display:flex}
+.panel{background:var(--side);border:1px solid var(--line);border-radius:16px;width:540px;
+max-width:92vw;max-height:80vh;overflow-y:auto;padding:20px}
+.panel h2{margin:0 0 4px;font-size:17px}.panel .sub{color:var(--dim);font-size:12.5px;margin-bottom:14px}
+.mrow{display:flex;align-items:center;gap:10px;padding:10px 8px;border-radius:10px;
+border:1px solid transparent}
+.mrow:hover{background:var(--card)}
+.mrow .nm{font-weight:600;font-size:14px}.mrow .ds{color:var(--dim);font-size:12px}
+.mrow .sz{color:var(--dim);font-size:12px;flex:none;width:54px;text-align:right}
+.mbtn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;
+padding:6px 12px;font-size:12.5px;cursor:pointer;font-family:inherit;flex:none}
+.mbtn:hover{border-color:var(--clay)}.mbtn.active{border-color:var(--green);color:var(--green)}
+.bar{height:6px;border-radius:4px;background:var(--card);overflow:hidden;margin-top:6px}
+.bar>div{height:100%;background:linear-gradient(90deg,var(--clay),var(--purple));width:0%;
+transition:width .4s}
+.warnbar{max-width:760px;margin:10px auto 0;padding:10px 14px;border:1px solid var(--clay);
+border-radius:10px;color:var(--ink);font-size:13px;background:rgba(217,119,87,.08);display:none}
+.warnbar b{color:var(--clay);cursor:pointer}
 .foot{color:var(--dim);font-size:11px;padding:8px;border-top:1px solid var(--line);line-height:1.5}
 /* ── main ── */
 main{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -184,9 +216,20 @@ button.send:hover{background:var(--clay2)}button.send:disabled{opacity:.4;cursor
 <header>
   <span id=title>New chat</span><span class=spacer></span>
   <span id=core><span class="dot off"></span>…</span>
-  <select id=model title="model"></select>
+  <select id=model title="quick switch"></select>
+  <button class=mbtn id=mopen>⚙ Models</button>
 </header>
+<div class=warnbar id=warn>No local model is running — click <b id=warnopen>⚙ Models</b> for one-click guided setup. Chat works in limited offline mode until then.</div>
 <div id=log><div class=wrap id=stream></div></div>
+<div class=overlay id=mm><div class=panel>
+  <h2>⚙ Models</h2>
+  <div class=sub>your local brains — switch instantly, or download new ones (all run on YOUR machine, $0)</div>
+  <div id=minstalled></div>
+  <div class=sub style="margin-top:14px">get more models <span style="opacity:.7">· one click, guided, downloads via Ollama</span></div>
+  <div id=mcatalog></div>
+  <div id=mpull style="display:none"><div class=sub id=mpulltxt></div><div class=bar><div id=mpullbar></div></div></div>
+  <div style="text-align:right;margin-top:14px"><button class=mbtn id=mclose>Close</button></div>
+</div></div>
 <footer>
   <div id=imgchip style="max-width:760px;margin:0 auto 6px;display:none;align-items:center;gap:8px;color:var(--dim);font-size:12px">
     <img id=imgprev style="height:42px;border-radius:8px;border:1px solid var(--line)"/>
@@ -224,9 +267,14 @@ function greet(){stream.innerHTML='<div class=greet><h1>How can I help?</h1>'+
 '<div style=margin-top:10px;font-size:12px>📎 attach an image — your local model can see it</div></div>'}
 function renderChats(d){chatsEl.innerHTML='';
  d.chats.forEach(c=>{const e=document.createElement('div');
- e.className='chat-it'+(c.active?' active':'');e.textContent=c.title;
+ e.className='chat-it'+(c.active?' active':'');
+ e.innerHTML='<span class=tt></span><span class=del title="delete chat">✕</span>';
+ e.querySelector('.tt').textContent=c.title;
  if(c.active)titleEl.textContent=c.title;
- e.onclick=()=>chatOp({op:'open',id:c.id});chatsEl.appendChild(e)});}
+ e.querySelector('.tt').onclick=()=>chatOp({op:'open',id:c.id});
+ e.querySelector('.del').onclick=(ev)=>{ev.stopPropagation();
+  if(confirm('Delete "'+c.title+'"? This cannot be undone.'))chatOp({op:'delete',id:c.id})};
+ chatsEl.appendChild(e)});}
 function renderMsgs(ms){stream.innerHTML='';if(!ms.length){greet();return}
  ms.forEach(m=>add(m.role=='user'?'you':'bot',m.content))}
 async function chatOp(body){const d=await (await fetch('/api/chat',{method:'POST',
@@ -237,6 +285,7 @@ async function loadChats(){const d=await (await fetch('/api/chats')).json();
 async function state(){const s=await (await fetch('/api/state')).json();
  ver.textContent='v'+s.version;
  core.innerHTML='<span class="dot '+(s.live?'live':'off')+'"></span>'+(s.live?s.model:'offline');
+document.getElementById('warn').style.display=s.live?'none':'block';
  sel.innerHTML='';s.models.forEach(m=>{const o=document.createElement('option');o.value=m;
  o.textContent=m;if(m.split(':')[0]==s.model.split(':')[0])o.selected=true;sel.appendChild(o)})}
 sel.onchange=async()=>{const b=await (await fetch('/api/model',{method:'POST',
@@ -274,5 +323,36 @@ go.onclick=()=>send(inp.value);
 inp.addEventListener('keydown',e=>{if(e.key=='Enter'&&!e.shiftKey){e.preventDefault();send(inp.value)}});
 inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=inp.scrollHeight+'px'});
 document.addEventListener('click',e=>{if(e.target.classList.contains('chip'))send(e.target.textContent)});
+const mm=document.getElementById('mm'),mi=document.getElementById('minstalled'),
+mc=document.getElementById('mcatalog'),mp=document.getElementById('mpull'),
+mpt=document.getElementById('mpulltxt'),mpb=document.getElementById('mpullbar');
+let mpoll=null;
+function row(html){const d=document.createElement('div');d.className='mrow';d.innerHTML=html;return d}
+async function renderModels(){const c=await (await fetch('/api/catalog')).json();
+ mi.innerHTML='';c.installed.forEach(m=>{const act=m.split(':')[0]==c.active.split(':')[0];
+  const e=row('<div style="flex:1"><div class=nm>'+m+'</div></div>'+
+   '<button class="mbtn'+(act?' active':'')+'">'+(act?'✓ active':'use')+'</button>');
+  e.querySelector('button').onclick=async()=>{await fetch('/api/model',{method:'POST',
+   headers:{'Content-Type':'application/json'},body:JSON.stringify({model:m})});
+   state();renderModels()};mi.appendChild(e)});
+ if(!c.installed.length)mi.appendChild(row('<div class=ds>nothing installed yet — pick one below ⤵</div>'));
+ mc.innerHTML='';c.catalog.filter(x=>!x.installed).forEach(x=>{
+  const e=row('<div style="flex:1"><div class=nm>'+x.name+'</div><div class=ds>'+x.desc+'</div></div>'+
+   '<span class=sz>'+x.size+'</span><button class=mbtn>⬇ download</button>');
+  e.querySelector('button').onclick=async()=>{await fetch('/api/pull',{method:'POST',
+   headers:{'Content-Type':'application/json'},body:JSON.stringify({model:x.name})});
+   pollPull()};mc.appendChild(e)});
+ if(c.pull&&c.pull.status=='pulling')pollPull();else mp.style.display='none'}
+function pollPull(){mp.style.display='block';if(mpoll)return;
+ mpoll=setInterval(async()=>{const c=await (await fetch('/api/catalog')).json();const p=c.pull;
+  if(p.status=='pulling'){mpt.textContent='downloading '+p.name+' — '+(p.pct||0)+'% ('+(p.stage||'')+')';
+   mpb.style.width=(p.pct||0)+'%'}
+  else{clearInterval(mpoll);mpoll=null;
+   mpt.textContent=p.status=='done'?p.name+' ready — click "use" to switch':'failed: '+(p.error||'');
+   mpb.style.width='100%';state();renderModels()}},1500)}
+document.getElementById('mopen').onclick=()=>{mm.classList.add('open');renderModels()};
+document.getElementById('mclose').onclick=()=>mm.classList.remove('open');
+mm.onclick=(e)=>{if(e.target===mm)mm.classList.remove('open')};
+document.getElementById('warnopen').onclick=()=>{mm.classList.add('open');renderModels()};
 state();loadChats();inp.focus();
 </script></body></html>"""
