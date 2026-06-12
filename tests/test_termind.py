@@ -987,3 +987,65 @@ def test_motion_layer_served():
     from termind.web import PAGE
     assert all(k in PAGE for k in ("class=typing", "@keyframes bounce", "celebrate(",
                                    "@keyframes confl", "id=clk", "⌥ Code", "wsbar"))
+
+
+def test_code_sessions_are_separate_from_chats():
+    s = _session()
+    s.view_mode = "chat"; s.handle("a normal chat message")
+    s.view_mode = "code"; s.chat_new(mode="code"); s.handle("build something here")
+    assert len(s.chats_list("chat")) == 1 and len(s.chats_list("code")) == 1
+    assert len(s.chats_list()) == 2
+    assert s.active_mode() == "code"
+    s2 = _session()                                    # modes persist
+    assert s2.chats_list("code")[0]["mode"] == "code"
+
+
+def test_code_mode_in_system_prompt(tmp_path):
+    s = _session()
+    s.set_workspace(str(tmp_path))
+    s.chat_new(mode="code")
+    sysmsg = s.chat_messages("hi")[0]["content"]
+    assert "CODE MODE" in sysmsg and str(tmp_path) in sysmsg
+    s.chat_new(mode="chat")
+    assert "CODE MODE" not in s.chat_messages("hi")[0]["content"]
+
+
+def test_ws_browse_navigates_real_dirs(tmp_path):
+    s = _session()
+    root = tmp_path / "area"; root.mkdir()
+    (root / "projects").mkdir()
+    (root / "notes").mkdir()
+    (root / ".hidden").mkdir()
+    d = s.ws_browse(str(root))
+    assert d["current"] == str(root)
+    assert set(d["dirs"]) == {"projects", "notes"}      # hidden skipped
+    assert d["parent"] and d["home"]
+    assert s.ws_browse("/nope/missing")["current"]      # falls back to home, no crash
+
+
+def test_web_browse_and_mode_endpoints(tmp_path):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve
+    s = r.Session(live=False)
+    root = tmp_path / "area"; root.mkdir()
+    (root / "sub").mkdir()
+    httpd, url = serve(s, port=8817, open_browser=False)
+    def post(path, body):
+        threading.Thread(target=httpd.handle_request, daemon=True).start()
+        req = urllib.request.Request(url + path, data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=3).read())
+    d = post("/api/ws", {"op": "browse", "path": str(root)})
+    assert d["dirs"] == ["sub"]
+    post("/api/chat", {"op": "new", "mode": "code"})
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    c = json.loads(urllib.request.urlopen(url + "/api/chats?mode=code", timeout=3).read())
+    assert len(c["chats"]) == 1 and c["active_mode"] == "code"
+    httpd.server_close()
+
+
+def test_claude_style_ui_served():
+    from termind.web import PAGE
+    assert all(k in PAGE for k in ("vtabs", "⌥ Code", "choose folder", "fprow",
+                                   "What are we building?", "data-view"))

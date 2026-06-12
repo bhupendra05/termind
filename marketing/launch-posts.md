@@ -367,3 +367,25 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind web app in code mode — a clay-tinted workspace bar reading "⌥ CODE MODE · ~/Developer/my-app", a slim file tree open beneath it, and in the chat a completed task bubble ("built my-app/ with 4 files") with tiny confetti pieces bursting off it and a soft green pulse ring. A small live clock pill ("17:42:08") in the header. Motion lines suggest the message sliding in. Top headline in bold charcoal: **"Your agent has a Code Mode now."** Subtitle: "termind v0.14 · workspace powers · file tree · confetti-grade feedback · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.15 — termind code, the Claude-style split
+
+### 📣 Post
+
+> **termind v0.15 — Chat and Code are now two worlds, one brain. Exactly the Claude pattern, fully local.**
+>
+> 💬⌥ **Two views, real tabs** — a segmented switcher in the sidebar: Chat for thinking, Code for building. Each has its OWN sessions list — your code conversations live separately from your everyday ones, and both survive restarts.
+> 📂 **Folder picking that actually works** — browsers can't hand a local app your folder paths (security), so termind now browses YOUR real directories server-side: click "choose folder", walk home → Developer → my-app, hit ✓. No typing paths ever again.
+> ⌥ **Code view feels like a code tool** — monospace conversation, clay-tinted workspace bar always visible, live file tree, "What are we building?" greeting with builder chips. The model knows it's in code mode and that file powers target your workspace.
+>
+> Local · private · $0 · 97 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #ClaudeCode #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind app with the sidebar's segmented switcher highlighted — "💬 Chat" and "⌥ Code" tabs, Code active in clay. Main pane shows the code view: monospace chat reading "build a small REST API here" → "built rest-api/ with 4 files ✓", a workspace bar with "📂 choose folder" and a path pill "~/Developer/my-app", and an open folder-picker modal listing real directories (Developer 📁, Documents 📁, models 📁) with a "✓ use this folder" button. Top headline in bold charcoal: **"Chat for thinking. Code for building. One local brain."** Subtitle: "termind v0.15 · separate code sessions · real folder browser · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

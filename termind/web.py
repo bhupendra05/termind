@@ -45,10 +45,14 @@ class _Handler(BaseHTTPRequestHandler):
                 "facts": len(s.store["facts"]), "chunks": s.chunks,
                 "version": __import__("termind").__version__,
             }))
-        if self.path == "/api/chats":
+        if self.path.startswith("/api/chats"):
             s = self.session
+            mode = None
+            if "mode=" in self.path:
+                mode = self.path.split("mode=")[1].split("&")[0] or None
             return self._send(200, json.dumps({
-                "chats": s.chats_list(),
+                "chats": s.chats_list(mode),
+                "active_mode": s.active_mode(),
                 "messages": s.history,            # messages of the active chat
             }))
         if self.path == "/api/catalog":
@@ -73,6 +77,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps({"reply": ""}))
             with self.session._lock:  # one model call at a time → consistent shared memory
                 try:
+                    self.session.view_mode = str(req.get("mode") or "chat")
                     # web has no stdin, so consent-gated actions auto-approve in the UI flow
                     out = self.session.handle_web(text, image=image,
                                                   image_name=req.get("image_name") or "image")
@@ -90,15 +95,16 @@ class _Handler(BaseHTTPRequestHandler):
             s = self.session
             with s._lock:
                 if req.get("op") == "new":
-                    s.chat_new()
+                    s.chat_new(mode=str(req.get("mode") or "chat"))
                 elif req.get("op") == "open":
                     s.chat_open(str(req.get("id", "")))
                 elif req.get("op") == "delete":
                     s.chat_delete(str(req.get("id", "")))
                 elif req.get("op") == "rename":
                     s.chat_rename(str(req.get("id", "")), str(req.get("title", "")))
-            return self._send(200, json.dumps({"chats": s.chats_list(),
-                                               "messages": s.history}))
+            return self._send(200, json.dumps({
+                "chats": s.chats_list(str(req.get("mode")) if req.get("mode") else None),
+                "messages": s.history}))
         if self.path == "/api/pull":
             out = self.session.start_pull(str(req.get("model", "")).strip())
             return self._send(200, json.dumps({"reply": out,
@@ -130,6 +136,9 @@ class _Handler(BaseHTTPRequestHandler):
             s = self.session
             op = req.get("op")
             with s._lock:
+                if op == "browse":
+                    return self._send(200, json.dumps(
+                        s.ws_browse(str(req.get("path", "")))))
                 if op == "set":
                     return self._send(200, json.dumps(
                         {"reply": s.set_workspace(str(req.get("path", "."))),
@@ -335,6 +344,21 @@ box-shadow:0 10px 30px var(--ring);animation:bob 3s ease-in-out infinite}
 background:linear-gradient(135deg,var(--clay),var(--clay2))!important;
 box-shadow:0 6px 18px var(--ring);transition:transform .15s,box-shadow .2s}
 #obgo:hover{transform:translateY(-2px);box-shadow:0 10px 26px var(--ring);color:#fff}
+.vtabs{display:flex;gap:6px;padding:0 0 10px}
+.vt{flex:1;border:1px solid var(--line);background:transparent;color:var(--dim);border-radius:10px;
+padding:8px 0;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;
+letter-spacing:.3px;transition:all .18s}
+.vt:hover{color:var(--ink);border-color:var(--dim)}
+.vt.on{background:var(--card);color:var(--clay);border-color:var(--clay)}
+.wspathpill{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);
+background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 11px;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+.fprow{display:flex;align-items:center;gap:8px;padding:8px 11px;border-radius:8px;cursor:pointer;
+font-family:'JetBrains Mono',monospace;font-size:12.5px;transition:background .12s}
+.fprow:hover{background:var(--card);color:var(--clay)}
+body[data-view=code] #log{font-size:13.5px}
+body[data-view=code] .bot .body,body[data-view=code] .you .body{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px}
+body[data-view=code] header{border-bottom-color:color-mix(in srgb,var(--clay) 35%,var(--line))}
 /* ── code mode ── */
 #wsbar{display:none;align-items:center;gap:9px;padding:9px 22px;border-bottom:1px solid var(--line);
 background:color-mix(in srgb,var(--clay) 5%,var(--bg));animation:slidedown .3s ease}
@@ -387,6 +411,10 @@ animation:confl .9s ease-out forwards;z-index:60}
 </style></head><body>
 <aside>
   <div class=brand>termind <small id=ver></small></div>
+  <div class=vtabs>
+    <button class="vt on" id=vchat>💬 Chat</button>
+    <button class=vt id=vcode>⌥ Code</button>
+  </div>
   <button class=newchat id=new>✚&nbsp; New chat</button>
   <div class=label>Chats</div>
   <div id=chats></div>
@@ -399,16 +427,25 @@ animation:confl .9s ease-out forwards;z-index:60}
   <select id=model title="quick switch"></select>
   <button class=mbtn id=mopen>⚙ Models</button>
   <button class=mbtn id=sopen>☰ Settings</button>
-  <button class=mbtn id=copen>⌥ Code</button>
   <span id=clk title="local time"></span>
 </header>
 <div id=wsbar>
-  <span class=wslab>⌥ CODE MODE</span>
-  <input id=wspath placeholder="workspace folder, e.g. ~/Developer/my-app">
-  <button class=mbtn id=wsset>set</button>
+  <span class=wslab>⌥ CODE</span>
+  <button class=mbtn id=wsbrowse>📂 choose folder</button>
+  <span id=wscur class=wspathpill>no workspace yet</span>
   <button class=mbtn id=wstree>📁 files</button>
-  <span class=ds id=wscur></span>
 </div>
+<div class=overlay id=fp><div class=panel style="width:480px">
+  <h2>📂 choose a workspace folder</h2>
+  <div class=sub>navigating YOUR real folders (server-side — that's why this works)</div>
+  <div id=fpcur class=wspathpill style="display:block;margin-bottom:10px"></div>
+  <div id=fplist style="max-height:300px;overflow-y:auto"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+    <button class=mbtn id=fphome>🏠 home</button>
+    <button class=mbtn id=fpsel style="background:var(--clay);color:#fff;border:0">✓ use this folder</button>
+    <button class=mbtn id=fpclose>cancel</button>
+  </div>
+</div></div>
 <div id=wstreebox></div>
 <div class=warnbar id=warn>No local model is running — click <b id=warnopen>⚙ Models</b> for one-click guided setup. Chat works in limited offline mode until then.</div>
 <div id=log><div class=wrap id=stream></div></div>
@@ -505,7 +542,14 @@ function add(who,txt){
  m.innerHTML=who=='you'?'<div class=body>'+fmt(txt)+'</div>'
  :'<div class=who>termind</div><div class=body>'+fmt(txt)+'</div>';
  stream.appendChild(m);log.scrollTop=log.scrollHeight;return m.querySelector('.body')}
-function greet(){stream.innerHTML='<div class=greet><h1>How can I help?</h1>'+
+function greet(){
+ if(view=='code'){stream.innerHTML='<div class=greet><h1>What are we building?</h1>'+
+ '<div>code mode — files, folders and builds land in your workspace</div><div class=chips>'+
+ '<span class=chip>build a small REST API here</span>'+
+ '<span class=chip>create a folder called utils</span>'+
+ '<span class=chip>write a Makefile for this project</span>'+
+ '<span class=chip>/tree</span></div></div>';return}
+ stream.innerHTML='<div class=greet><h1>How can I help?</h1>'+
 '<div>your private local agent — it remembers you</div><div class=chips>'+
 '<span class=chip>who am i?</span><span class=chip>/status</span>'+
 '<span class=chip>create a new project: a python dice roller</span>'+
@@ -527,10 +571,10 @@ function renderChats(d){chatsEl.innerHTML='';
  chatsEl.appendChild(e)});}
 function renderMsgs(ms){stream.innerHTML='';if(!ms.length){greet();return}
  ms.forEach(m=>add(m.role=='user'?'you':'bot',m.content))}
-async function chatOp(body){const d=await (await fetch('/api/chat',{method:'POST',
+async function chatOp(body){body.mode=view;const d=await (await fetch('/api/chat',{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
  renderChats(d);renderMsgs(d.messages);if(body.op=='new')titleEl.textContent='New chat'}
-async function loadChats(){const d=await (await fetch('/api/chats')).json();
+async function loadChats(){const d=await (await fetch('/api/chats?mode='+view)).json();
  renderChats(d);renderMsgs(d.messages)}
 async function state(){const s=await (await fetch('/api/state')).json();
  ver.textContent='v'+s.version;
@@ -542,6 +586,7 @@ sel.onchange=async()=>{const b=await (await fetch('/api/model',{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value})})).json();
  add('bot',b.reply);state()}
 document.getElementById('new').onclick=()=>chatOp({op:'new'});
+let view='chat';
 let busy=false,img=null,imgName='',imgURL='';
 const att=document.getElementById('att'),file=document.getElementById('file'),
 chip=document.getElementById('imgchip'),prev=document.getElementById('imgprev'),
@@ -559,7 +604,7 @@ async function send(t){if(busy||(!t.trim()&&!img))return;busy=true;go.disabled=t
  inp.value='';inp.style.height='auto';
  const b=add('bot','');b.innerHTML='<span class=typing><i></i><i></i><i></i></span>';
  try{const r=await (await fetch('/api/send',{method:'POST',
-  headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,image:img,image_name:imgName})})).json();
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,image:img,image_name:imgName,mode:view})})).json();
   img=null;imgName='';imgURL='';chip.style.display='none';file.value='';
   b.innerHTML=r.reply=='__EXIT__'?'<span class=think>session closed.</span>':fmt(r.reply||'(no output)');
   if(r.image){const im=document.createElement('img');im.src='data:image/png;base64,'+r.image;
@@ -684,10 +729,34 @@ setInterval(()=>{const d=new Date();
  clk.title=d.toDateString()},1000);
 /* code mode */
 const wsbar=document.getElementById('wsbar'),wsbox=document.getElementById('wstreebox'),
-wspath=document.getElementById('wspath'),wscur=document.getElementById('wscur');
-document.getElementById('copen').onclick=()=>{wsbar.classList.toggle('on');
- if(!wsbar.classList.contains('on'))wsbox.classList.remove('on');
- else refreshWs()};
+wscur=document.getElementById('wscur');
+function setView(v){view=v;document.body.dataset.view=v;
+ document.getElementById('vchat').classList.toggle('on',v=='chat');
+ document.getElementById('vcode').classList.toggle('on',v=='code');
+ wsbar.classList.toggle('on',v=='code');
+ if(v!='code')wsbox.classList.remove('on');else refreshWs();
+ loadChats()}
+document.getElementById('vchat').onclick=()=>setView('chat');
+document.getElementById('vcode').onclick=()=>setView('code');
+/* folder picker */
+const fp=document.getElementById('fp'),fpl=document.getElementById('fplist'),
+fpc=document.getElementById('fpcur');let fppath='';
+async function browse(p){const d=await (await fetch('/api/ws',{method:'POST',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'browse',path:p||''})})).json();
+ fppath=d.current;fpc.textContent=d.current;fpl.innerHTML='';
+ if(d.parent){const up=document.createElement('div');up.className='fprow';
+  up.textContent='⬆ ..';up.onclick=()=>browse(d.parent);fpl.appendChild(up)}
+ d.dirs.forEach(n=>{const e=document.createElement('div');e.className='fprow';
+  e.textContent='📁 '+n;e.onclick=()=>browse(fppath+'/'+n);fpl.appendChild(e)})}
+document.getElementById('wsbrowse').onclick=()=>{fp.classList.add('open');browse(wscur.textContent.includes('/')?wscur.textContent:'')};
+document.getElementById('fphome').onclick=()=>browse('~');
+document.getElementById('fpclose').onclick=()=>fp.classList.remove('open');
+fp.onclick=(e)=>{if(e.target===fp)fp.classList.remove('open')};
+document.getElementById('fpsel').onclick=async()=>{fp.classList.remove('open');
+ const r=await (await fetch('/api/ws',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({op:'set',path:fppath})})).json();
+ wscur.textContent=r.workspace;add('bot',r.reply);
+ celebrate(document.querySelector('#stream .msg:last-child .body')||document.body);refreshWs()};
 async function refreshWs(){const d=await (await fetch('/api/ws',{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'tree'})})).json();
  wscur.textContent=d.workspace;renderTree(d.tree)}
@@ -698,13 +767,9 @@ function renderTree(t){wsbox.innerHTML='';t.forEach(e=>{const d=document.createE
   headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'read',path:e.path})})).json();
   add('bot','`'+r.path+'`\n```\n'+r.content.slice(0,4000)+'\n```');wsbox.classList.remove('on')};
  wsbox.appendChild(d)})}
-document.getElementById('wsset').onclick=async()=>{const r=await (await fetch('/api/ws',
- {method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({op:'set',path:wspath.value||'.'})})).json();
- add('bot',r.reply);celebrate(document.querySelector('#stream .msg:last-child .body')||document.body);
- refreshWs()};
+
 document.getElementById('wstree').onclick=()=>{wsbox.classList.toggle('on');
  if(wsbox.classList.contains('on'))refreshWs()};
-wspath.addEventListener('keydown',e=>{if(e.key=='Enter')document.getElementById('wsset').click()});
+
 state();loadChats();loadProfile();inp.focus();
 </script></body></html>"""

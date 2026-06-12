@@ -268,9 +268,10 @@ class Session:
     def _new_chat_id(self) -> str:
         return f"{int(time.time() * 1000)}-{len(self.store['chats'])}"  # collision-proof
 
-    def chat_new(self, title: str = "New chat") -> str:
+    def chat_new(self, title: str = "New chat", mode: str = "chat") -> str:
         cid = self._new_chat_id()
-        self.store["chats"][cid] = {"title": title, "ts": time.time(), "messages": []}
+        self.store["chats"][cid] = {"title": title, "ts": time.time(), "messages": [],
+                                    "mode": mode}
         self.store["active_chat"] = cid
         self.history = []
         store_save(self.store)
@@ -309,17 +310,24 @@ class Session:
         store_save(self.store)
         return True
 
-    def chats_list(self) -> list:
+    def chats_list(self, mode: str = None) -> list:
         items = sorted(self.store["chats"].items(), key=lambda kv: -kv[1].get("ts", 0))
         return [{"id": k, "title": v.get("title", "Chat"),
-                 "active": k == self.store.get("active_chat")} for k, v in items]
+                 "mode": v.get("mode", "chat"),
+                 "active": k == self.store.get("active_chat")} for k, v in items
+                if mode is None or v.get("mode", "chat") == mode]
+
+    def active_mode(self) -> str:
+        c = self.store["chats"].get(self.store.get("active_chat") or "")
+        return (c or {}).get("mode", "chat")
 
     def _save_chat(self, first_user_text: str) -> None:
         cid = self.store.get("active_chat")
         if not cid or cid not in self.store["chats"]:
             # create the record inline — chat_new() would wipe the history we're saving
             cid = self._new_chat_id()
-            self.store["chats"][cid] = {"title": "New chat", "ts": time.time(), "messages": []}
+            self.store["chats"][cid] = {"title": "New chat", "ts": time.time(),
+                                        "messages": [], "mode": getattr(self, "view_mode", "chat")}
             self.store["active_chat"] = cid
         c = self.store["chats"][cid]
         c["messages"] = self.history[-40:]
@@ -647,6 +655,10 @@ class Session:
                "you performed an action (edit, save, send) — the app does actions and reports "
                "them itself; if asked to do one, tell the user to phrase it as a request like "
                "'remove the logo' and the app will handle it.")
+        if self.active_mode() == "code":
+            sys += (f" CODE MODE is active. Workspace: {self.workspace()}. You have elevated "
+                    "file powers here: the app creates folders/files, scaffolds projects, and "
+                    "runs commands IN THIS WORKSPACE when the user asks.")
         if p["name"]:
             sys += (f" Your user's profile — name: {p['name']}"
                     + (f", role: {p['role']}" if p['role'] else "")
@@ -986,6 +998,20 @@ class Session:
         if ws and os.path.isdir(ws):
             return ws
         return os.getcwd()
+
+    def ws_browse(self, path: str = "") -> dict:
+        """Server-side folder browser: the web picker navigates real directories here."""
+        full = os.path.abspath(os.path.expanduser(path.strip() or "~"))
+        if not os.path.isdir(full):
+            full = os.path.expanduser("~")
+        try:
+            dirs = sorted(d for d in os.listdir(full)
+                          if os.path.isdir(os.path.join(full, d)) and not d.startswith("."))
+        except OSError:
+            dirs = []
+        parent = os.path.dirname(full)
+        return {"current": full, "parent": parent if parent != full else None,
+                "dirs": dirs[:200], "home": os.path.expanduser("~")}
 
     def ws_tree(self, max_entries: int = 200) -> list:
         """A compact file tree of the workspace (depth 3, junk dirs skipped)."""
