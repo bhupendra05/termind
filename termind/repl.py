@@ -1038,6 +1038,8 @@ class Session:
         log = []
         final = None
         nudges = 0
+        last_fail = None
+        repeats = 0
         for _ in range(12):
             with Thinking("code agent working"):
                 act = parse_action(self._chat(msgs, fmt_json=True))
@@ -1067,10 +1069,23 @@ class Session:
             else:
                 res = f"unknown tool: {tool or act}"
             short = res.split("\n")[0][:110]
-            log.append(("✓ " if not short.startswith(("⛔", "(", "can'")) else "") +
-                       f"{tool} → {short}")
+            failed = short.startswith(("⛔", "✗", "(", "can'", "couldn", "unknown",
+                                       "command timed", "REJECTED"))
+            log.append(("✗ " if failed else "✓ ") + f"{tool} → {short}")
+            if failed and short == last_fail:
+                repeats += 1
+            else:
+                repeats = 0
+            last_fail = short if failed else None
+            if repeats >= 2:                        # same failure 3x → stop the spiral
+                final = ("I kept hitting the same error and stopped retrying. Try: "
+                         "'write a simpler version' or split the task into smaller files.")
+                break
+            extra = (" You are repeating a failing action — CHANGE approach: simpler "
+                     "content, fewer/escaped quotes, or split into smaller files."
+                     if repeats == 1 else "")
             msgs += [{"role": "assistant", "content": json.dumps(act)},
-                     {"role": "user", "content": "RESULT: " + res[:2000]}]
+                     {"role": "user", "content": "RESULT: " + res[:2000] + extra}]
         if final is None:
             final = "(step limit reached — say 'continue' to keep going)"
         out = ("\n".join(log) + ("\n\n" if log else "")) + final
@@ -1090,8 +1105,20 @@ class Session:
         content = self._strip_fences(content) if content.lstrip().startswith("```") else content
         if rel.endswith(".py"):
             err = self._py_error(rel, content)
+            for _ in range(2):                      # heal HERE: error + broken code → model
+                if not err or not self.live:
+                    break
+                with Thinking(f"healing {rel}"):
+                    content = self._strip_fences(self._chat([
+                        {"role": "system", "content":
+                         "Reply ONLY with the corrected, complete file content — no fences."},
+                        {"role": "user", "content":
+                         f"This {rel} has a syntax error ({err}). Fix it and return the "
+                         f"full file:\n\n{content}"}]))
+                err = self._py_error(rel, content)
             if err:
-                return f"REJECTED — python syntax error ({err}); send a corrected write"
+                return (f"✗ couldn't produce valid python for {rel} ({err}) — write a "
+                        "SIMPLER version: shorter strings, no tricky quotes, smaller file")
         os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
         with open(full, "w", encoding="utf-8") as f:
             f.write(content if content.endswith("\n") else content + "\n")

@@ -1166,7 +1166,7 @@ def test_code_agent_plan_mode_does_nothing(tmp_path, monkeypatch):
 def test_agent_write_rejects_broken_python_and_escapes(tmp_path):
     s = _session()
     s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
-    assert "REJECTED" in s._agent_write("x.py", "def broken(:")
+    assert s._agent_write("x.py", "def broken(:").startswith("✗")
     assert not (tmp_path / "x.py").exists()
     assert "⛔" in s._agent_write("../evil.txt", "x")
     assert "wrote ok.py" in s._agent_write("ok.py", "a = 1")
@@ -1183,3 +1183,36 @@ def test_chats_api_reports_workspace(tmp_path):
     d = json.loads(urllib.request.urlopen(url + "/api/chats?mode=code", timeout=3).read())
     assert d["workspace"] == str(tmp_path) and d["has_ws"] is True
     httpd.server_close()
+
+
+def test_agent_write_heals_broken_python_inline(tmp_path, monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "x = 'fixed'\n")   # the heal reply
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s._agent_write("app.py", "x = 'broken")                      # bad quote
+    assert "wrote app.py" in out and (tmp_path / "app.py").read_text() == "x = 'fixed'\n"
+
+
+def test_agent_write_gives_up_gracefully(tmp_path, monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "still 'broken")    # heal also fails
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s._agent_write("app.py", "x = 'broken")
+    assert out.startswith("✗") and "SIMPLER" in out
+    assert not (tmp_path / "app.py").exists()                          # nothing broken on disk
+
+
+def test_loop_breaks_repeat_failure_spiral(tmp_path, monkeypatch):
+    """THE 11x-REJECTED transcript: identical failures must stop the loop early."""
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda msgs, **k: _json.dumps(
+        {"tool": "write", "path": "../escape.py", "content": "x=1"}))  # always same ⛔
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s.handle_web("create something")
+    assert out.count("✗") <= 3                                         # not 11 wasted steps
+    assert "stopped retrying" in out
+    assert "✓" not in out.split("\n\n")[0]                             # failures marked ✗
