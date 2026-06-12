@@ -389,3 +389,30 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind app with the sidebar's segmented switcher highlighted — "💬 Chat" and "⌥ Code" tabs, Code active in clay. Main pane shows the code view: monospace chat reading "build a small REST API here" → "built rest-api/ with 4 files ✓", a workspace bar with "📂 choose folder" and a path pill "~/Developer/my-app", and an open folder-picker modal listing real directories (Developer 📁, Documents 📁, models 📁) with a "✓ use this folder" button. Top headline in bold charcoal: **"Chat for thinking. Code for building. One local brain."** Subtitle: "termind v0.15 · separate code sessions · real folder browser · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.16 — Plan / Act / Bypass: a real coding agent with a leash
+
+### 📣 Post
+
+> **termind v0.16 — Code mode grew up: it edits your files, it can't escape your folder, and YOU choose how much rope it gets.**
+>
+> ✏️ **It edits now** — "fix app.py: handle the null case" → reads the file, rewrites it, compile-checks the result, self-heals syntax errors, writes back with a ±lines summary. Not just creating files anymore — maintaining them.
+> 🔒 **The workspace jail** — every file operation is path-resolved and checked: nothing escapes the folder you selected. "../" tricks and absolute paths get a flat ⛔. Your repo is the sandbox.
+> 🎛️ **Agent modes, Claude-style** —
+> · 📋 **plan** — it proposes exactly what it WOULD do; zero side effects
+> · ▶ **act** — actions execute (the default)
+> · ⚡ **bypass** — no confirmations, everything auto-runs
+> One click in the workspace bar (or /mode in the terminal), persisted.
+> 👤 **Settings where you expect them** — click your name (avatar chip, bottom of the sidebar) to open Settings, exactly like the Claude apps.
+>
+> Local · private · $0 · 103 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #ClaudeCode #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind code view; the workspace bar shows three mode pills — "📋 plan", "▶ act" (lit clay), "⚡ bypass" — beside a path pill "~/Developer/my-app". In the chat: "fix app.py: handle the null case" → "edited app.py (±12 lines) ✓" with a small confetti burst. Around the workspace, a subtle glowing fence/border with a ⛔ badge stopping an arrow labeled "../escape". Bottom-left of the sidebar, an avatar chip "B · Bhupendra" with a settings gear hint. Top headline in bold charcoal: **"An agent that edits your code — on a leash you control."** Subtitle: "termind v0.16 · plan / act / bypass · workspace jail · file editing · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

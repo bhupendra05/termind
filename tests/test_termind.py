@@ -1049,3 +1049,69 @@ def test_claude_style_ui_served():
     from termind.web import PAGE
     assert all(k in PAGE for k in ("vtabs", "⌥ Code", "choose folder", "fprow",
                                    "What are we building?", "data-view"))
+
+
+def test_workspace_jail_blocks_escapes(tmp_path):
+    s = _session()
+    s.set_workspace(str(tmp_path))
+    s.view_mode = "code"
+    assert "⛔ blocked" in s.do_mkdir("../escape-attempt")
+    assert "⛔ blocked" in s.do_mkdir("/tmp/absolute-escape")
+    assert "created folder" in s.do_mkdir("inside/ok")          # inside is fine
+    assert (tmp_path / "inside" / "ok").is_dir()
+
+
+def test_edit_file_rewrites_and_heals(tmp_path, monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: "def add(a, b):\n    return a + b\n")
+    s = r.Session(live=True)
+    s.set_workspace(str(tmp_path))
+    s.view_mode = "code"
+    (tmp_path / "math.py").write_text("def add(a):\n    return a\n")
+    out = s.do_edit_file("math.py", "take two args")
+    assert "edited math.py" in out
+    assert "a + b" in (tmp_path / "math.py").read_text()
+    assert "⛔ blocked" in s.do_edit_file("../../etc/hosts", "x")
+    assert "no such file" in s.do_edit_file("ghost.py", "x")
+
+
+def test_edit_file_intent_routing(tmp_path, monkeypatch):
+    import termind.repl as r
+    monkeypatch.setattr(r.Session, "do_edit_file",
+                        lambda self, f, i: f"EDIT:{f}|{i}")
+    s = _session()
+    s.set_workspace(str(tmp_path))
+    (tmp_path / "app.py").write_text("x=1")
+    assert s.handle("fix app.py: handle the null case") == "EDIT:app.py|handle the null case"
+    out = s.handle("fix nonexistent.py: whatever")        # no file → not routed to editor
+    assert not out.startswith("EDIT:")
+
+
+def test_plan_mode_executes_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    s = _session()
+    s.set_workspace(str(tmp_path))
+    s.view_mode = "code"
+    s.set_mode("plan")
+    out = s.handle("create a folder called zed")
+    assert out.startswith("📋")
+    assert not (tmp_path / "zed").exists()                 # NOTHING was created
+    s.set_mode("act")
+    s.handle("create a folder called zed")
+    assert (tmp_path / "zed").is_dir()                     # act mode does it
+
+
+def test_mode_persists_and_bypass_autoconfirms():
+    s = _session()
+    s.set_mode("bypass")
+    assert s._confirm("anything?") == "y"
+    s2 = _session()
+    assert s2.agent_mode == "bypass"
+    s2.set_mode("act")
+    assert _session().agent_mode == "act"
+
+
+def test_mode_ui_and_profile_chip_served():
+    from termind.web import PAGE
+    assert all(k in PAGE for k in ("data-m=plan", "data-m=act", "data-m=bypass",
+                                   "mecard", "meav", "/api/mode"))

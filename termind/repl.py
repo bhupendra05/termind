@@ -36,6 +36,11 @@ CATALOG = [
 from .helpdocs import DOC as HELP_DOC, best_topic
 from .store import load as store_load, save as store_save
 
+# "edit/fix/update <file.ext>: <instruction>" → the file-editing engine (code mode).
+EDIT_FILE = re.compile(
+    r"^\s*(?:edit|fix|update|modify|refactor|change)\s+(?:the\s+)?"
+    r"([\w./-]+\.[A-Za-z0-9]{1,8})\b[:,]?\s*(.*)$", re.I)
+
 # Questions about termind itself → the support bot (answers FROM the built-in docs).
 HELP_HINT = re.compile(
     r"\btermind\b.*\b(what|how|can|do|does|limit|work|use)|"
@@ -457,7 +462,9 @@ class Session:
         return t.strip() + "\n"
 
     def do_mkdir(self, path: str) -> str:
-        full = os.path.expanduser(path)
+        full = self._safe_path(path)
+        if full is None:
+            return f"⛔ blocked: '{path}' is outside the workspace (code mode is jailed)"
         os.makedirs(full, exist_ok=True)
         self.actions += 1
         return f"created folder: {full}"
@@ -490,7 +497,9 @@ class Session:
               f"{D}{preview}{N}\n")
         if str((confirm or self._confirm)(f"  {PK}write it? [y/N]{N} ")).strip().lower() != "y":
             return "aborted — nothing was written."
-        full = os.path.expanduser(file)
+        full = self._safe_path(file)
+        if full is None:
+            return f"⛔ blocked: '{file}' is outside the workspace (code mode is jailed)"
         os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
         with open(full, "w", encoding="utf-8") as f:
             f.write(content)
@@ -518,7 +527,9 @@ class Session:
               + ", ".join(files) + "\n")
         if str((confirm or self._confirm)(f"  {PK}build it? [y/N]{N} ")).strip().lower() != "y":
             return "aborted — nothing was created."
-        root = os.path.expanduser(folder)
+        root = self._safe_path(folder)
+        if root is None:
+            return f"⛔ blocked: '{folder}' is outside the workspace (code mode is jailed)"
         healed = 0
         for rel, content in files.items():
             code = self._strip_fences(str(content))
@@ -589,10 +600,22 @@ class Session:
             return f"here's the current image ({self.last_image[0]}) ⤵"
         return None
 
+    def _code_route(self, text: str):
+        """Code-mode extras: file edits by name, and the plan-mode gate."""
+        m = EDIT_FILE.match(text)
+        if m and os.path.isfile(os.path.join(self.workspace(), m.group(1))):
+            return self.do_edit_file(m.group(1), m.group(2) or "improve it")
+        if self.agent_mode == "plan" and (ACTION_HINT.search(text) or EDIT_FILE.match(text)):
+            return self.do_plan(text)
+        return None
+
     def route(self, text: str) -> str:
         follow = self._image_followups(text)
         if follow is not None:
             return follow
+        code = self._code_route(text)
+        if code is not None:
+            return code
         if HELP_HINT.search(text):
             return self.do_helpbot(text)              # questions about termind → support bot
         if self.last_image and EDIT_HINT.search(text):
@@ -983,6 +1006,85 @@ class Session:
         return (f"applied {' → '.join(applied)}\nsaved: {out_path} "
                 f"({img.width}x{img.height}) — it's now the active image")
 
+    # ── agent modes: plan / act / bypass ─────────────────────────────────────
+    @property
+    def agent_mode(self) -> str:
+        return self.store.get("agent_mode", "act")
+
+    def set_mode(self, mode: str) -> str:
+        mode = mode.strip().lower()
+        if mode not in ("plan", "act", "bypass"):
+            return "modes: plan (propose only, nothing executes) · act (default) · bypass (no confirms)"
+        self.store["agent_mode"] = mode
+        store_save(self.store)
+        if mode == "bypass":
+            self._confirm = lambda _p="": "y"      # every y/N auto-approves
+        elif self._confirm is not input:
+            self._confirm = input
+        return {"plan": "📋 plan mode — I'll propose, nothing executes until you switch to act",
+                "act": "▶ act mode — actions execute (file ops consented per request)",
+                "bypass": "⚡ bypass mode — no confirmations, everything auto-runs"}[mode]
+
+    def do_plan(self, request: str) -> str:
+        """Plan mode: outline exactly what WOULD happen — zero side effects."""
+        if not self.live:
+            return ("📋 plan (offline): I would interpret your request, list the files/"
+                    "folders to create or edit inside the workspace, and wait for act mode.")
+        with Thinking("planning (nothing will execute)"):
+            out = self._chat([
+                {"role": "system", "content":
+                 f"PLAN ONLY — nothing will be executed. Workspace: {self.workspace()}. "
+                 "Outline the concrete steps: every file you would create or edit (with "
+                 "paths), every folder, every command. Short numbered list. Do NOT write "
+                 "the actual code."},
+                {"role": "user", "content": request}])
+        return "📋 PLAN (nothing executed — switch to ▶ act to do it):\n" + out
+
+    def _safe_path(self, p: str):
+        """The workspace jail: in code mode, every file op must stay inside the workspace."""
+        full = os.path.abspath(os.path.join(self.workspace(), os.path.expanduser(p)))
+        if getattr(self, "view_mode", "chat") == "code" or self.active_mode() == "code":
+            ws = self.workspace()
+            if not (full == ws or full.startswith(ws + os.sep)):
+                return None
+        return full
+
+    def do_edit_file(self, rel: str, instruction: str) -> str:
+        """Edit an EXISTING file in the workspace: read → model rewrites → heal → write."""
+        if not self.live:
+            return "file editing needs a live model — install Ollama (./setup.sh)"
+        full = self._safe_path(rel)
+        if full is None:
+            return f"⛔ blocked: '{rel}' is outside the workspace (code mode is jailed)"
+        if not os.path.isfile(full):
+            return f"no such file in the workspace: {rel} (try /tree)"
+        with open(full, "r", encoding="utf-8", errors="ignore") as f:
+            old = f.read(40000)
+        if self.agent_mode == "plan":
+            return self.do_plan(f"edit {rel}: {instruction}")
+        with Thinking(f"editing {rel}"):
+            new = self._strip_fences(self._chat([
+                {"role": "system", "content":
+                 "You edit code files. Reply ONLY with the COMPLETE new file content — no "
+                 "fences, no commentary. Keep everything that shouldn't change."},
+                {"role": "user", "content":
+                 f"File {rel}:\n\n{old}\n\nEdit it as follows: {instruction}"}]))
+            for _ in range(2):                      # same self-heal gate as generation
+                err = self._py_error(rel, new)
+                if not err:
+                    break
+                new = self._strip_fences(self._chat([
+                    {"role": "system", "content": "Reply ONLY with the corrected full file."},
+                    {"role": "user", "content":
+                     f"This {rel} has a syntax error ({err}). Fix it:\n\n{new}"}]))
+        import difflib
+        changed = sum(1 for d in difflib.unified_diff(
+            old.splitlines(), new.splitlines()) if d[:1] in "+-")
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(new)
+        self.actions += 1
+        return f"edited {rel} (±{max(changed-2,0)} lines) — open it: /read {rel}"
+
     # ── code mode: workspace, file tree, file reading ────────────────────────
     def set_workspace(self, path: str) -> str:
         full = os.path.abspath(os.path.expanduser(path.strip() or "."))
@@ -1315,6 +1417,8 @@ class Session:
                 return "usage: /chat new · /chat <n> · /chat delete <n>"
             self.chat_open(cid)
             return f"resumed: {self.store['chats'][cid]['title']} ({len(self.history)} messages)"
+        if line == "/mode" or line.startswith("/mode "):
+            return self.set_mode(line[5:].strip() or "")
         if line.startswith("/ws"):
             return self.set_workspace(line[3:].strip() or ".")
         if line.startswith("/tree"):
@@ -1383,6 +1487,9 @@ class Session:
             follow = self._image_followups(line)
             if follow is not None:
                 return follow
+            code = self._code_route(line)
+            if code is not None:
+                return code
             if self.last_image and EDIT_HINT.search(line) and not line.startswith("/"):
                 return self.do_edit(line)             # edit the previously sent image
             if line.strip().lower().startswith(("/build", "create", "make", "build", "new")) \
@@ -1417,6 +1524,8 @@ class Session:
             return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith(("/chats", "/chat")):
             return _panel("SESSIONS", out.replace("\n", f"\n{CY}│{N} "), CY)
+        if s == "/mode" or s.startswith("/mode "):
+            return _panel("AGENT MODE", out, YL)
         if s.startswith(("/ws", "/tree", "/read")):
             return _panel("WORKSPACE", out.replace("\n", f"\n{CY}│{N} "), CY)
         if s.startswith(("/guide", "/profile")):

@@ -10,7 +10,7 @@ import json
 import os
 
 EMPTY = {"facts": [], "docs": {}, "history": [], "vecs": {}, "model": None,
-         "chats": {}, "active_chat": None, "profile": {}, "workspace": None}
+         "chats": {}, "active_chat": None, "profile": {}, "workspace": None, "agent_mode": "act"}
 
 
 def store_path() -> str:
@@ -29,10 +29,11 @@ def load() -> dict:
                 "chats": dict(data.get("chats", {})),
                 "active_chat": data.get("active_chat"),
                 "profile": dict(data.get("profile", {})),
-                "workspace": data.get("workspace")}
+                "workspace": data.get("workspace"),
+                "agent_mode": data.get("agent_mode", "act")}
     except Exception:
         return {"facts": [], "docs": {}, "history": [], "vecs": {}, "model": None,
-                "chats": {}, "active_chat": None, "profile": {}, "workspace": None}
+                "chats": {}, "active_chat": None, "profile": {}, "workspace": None, "agent_mode": "act"}
 
 
 def save(data: dict) -> None:

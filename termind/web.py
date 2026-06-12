@@ -44,6 +44,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "models": list_models() or [s.model],
                 "facts": len(s.store["facts"]), "chunks": s.chunks,
                 "version": __import__("termind").__version__,
+                "agent_mode": s.agent_mode,
             }))
         if self.path.startswith("/api/chats"):
             s = self.session
@@ -151,6 +152,10 @@ class _Handler(BaseHTTPRequestHandler):
                         {"path": req.get("path", ""),
                          "content": s.ws_read(str(req.get("path", "")))}))
             return self._send(400, json.dumps({"error": "bad op"}))
+        if self.path == "/api/mode":
+            out = self.session.set_mode(str(req.get("mode", "")))
+            return self._send(200, json.dumps({"reply": out,
+                                               "agent_mode": self.session.agent_mode}))
         if self.path == "/api/model":
             name = (req.get("model") or "").strip()
             with self.session._lock:
@@ -215,6 +220,14 @@ transition:background .15s ease}
 .chat-it .del{visibility:hidden;color:var(--dim);padding:1px 5px;border-radius:6px;flex:none;
 font-size:11px;transition:all .15s}
 .chat-it:hover .del{visibility:visible}.chat-it .del:hover{color:#fff;background:var(--clay)}
+#mecard{display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;
+border:1px solid var(--line);cursor:pointer;transition:all .15s;background:var(--card)}
+#mecard:hover{border-color:var(--clay)}
+.meav{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none;
+background:linear-gradient(135deg,var(--clay),var(--clay2));color:#fff;font-weight:700;
+font-size:14px;box-shadow:0 2px 8px var(--ring)}
+.men{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mes{font-size:10.5px;color:var(--dim)}
 .foot{color:var(--dim);font-size:10.5px;padding:10px 8px 2px;border-top:1px solid var(--line);
 line-height:1.9;letter-spacing:.3px}
 /* ───────── main ───────── */
@@ -353,6 +366,12 @@ letter-spacing:.3px;transition:all .18s}
 .wspathpill{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);
 background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 11px;
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+.modes{display:flex;gap:4px;margin-left:auto}
+.mode{border:1px solid var(--line);background:transparent;color:var(--dim);border-radius:8px;
+padding:6px 10px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;
+transition:all .15s;letter-spacing:.2px}
+.mode:hover{color:var(--ink);border-color:var(--dim)}
+.mode.on{color:var(--clay);border-color:var(--clay);background:color-mix(in srgb,var(--clay) 9%,transparent)}
 .fprow{display:flex;align-items:center;gap:8px;padding:8px 11px;border-radius:8px;cursor:pointer;
 font-family:'JetBrains Mono',monospace;font-size:12.5px;transition:background .12s}
 .fprow:hover{background:var(--card);color:var(--clay)}
@@ -418,7 +437,12 @@ animation:confl .9s ease-out forwards;z-index:60}
   <button class=newchat id=new>✚&nbsp; New chat</button>
   <div class=label>Chats</div>
   <div id=chats></div>
-  <div class=foot>private · $0/query<br>sandboxed on AION<br>localhost only</div>
+  <div id=mecard title="profile & settings">
+    <span class=meav id=meav>?</span>
+    <span style="min-width:0"><div class=men id=men>set up profile</div>
+    <div class=mes>profile · settings</div></span>
+  </div>
+  <div class=foot>private · $0/query · sandboxed on AION · localhost only</div>
 </aside>
 <main>
 <header>
@@ -426,7 +450,6 @@ animation:confl .9s ease-out forwards;z-index:60}
   <span id=core><span class="dot off"></span>…</span>
   <select id=model title="quick switch"></select>
   <button class=mbtn id=mopen>⚙ Models</button>
-  <button class=mbtn id=sopen>☰ Settings</button>
   <span id=clk title="local time"></span>
 </header>
 <div id=wsbar>
@@ -434,6 +457,11 @@ animation:confl .9s ease-out forwards;z-index:60}
   <button class=mbtn id=wsbrowse>📂 choose folder</button>
   <span id=wscur class=wspathpill>no workspace yet</span>
   <button class=mbtn id=wstree>📁 files</button>
+  <span class=modes>
+    <button class=mode data-m=plan title="propose only — nothing executes">📋 plan</button>
+    <button class=mode data-m=act title="actions execute">▶ act</button>
+    <button class=mode data-m=bypass title="no confirmations, auto-run everything">⚡ bypass</button>
+  </span>
 </div>
 <div class=overlay id=fp><div class=panel style="width:480px">
   <h2>📂 choose a workspace folder</h2>
@@ -579,6 +607,7 @@ async function loadChats(){const d=await (await fetch('/api/chats?mode='+view)).
 async function state(){const s=await (await fetch('/api/state')).json();
  ver.textContent='v'+s.version;
  core.innerHTML='<span class="dot '+(s.live?'live':'off')+'"></span>'+(s.live?s.model:'offline');
+document.querySelectorAll('.mode').forEach(b=>b.classList.toggle('on',b.dataset.m==s.agent_mode));
 document.getElementById('warn').style.display=s.live?'none':'block';
  sel.innerHTML='';s.models.forEach(m=>{const o=document.createElement('option');o.value=m;
  o.textContent=m;if(m.split(':')[0]==s.model.split(':')[0])o.selected=true;sel.appendChild(o)})}
@@ -677,6 +706,8 @@ document.querySelectorAll('.tbtn').forEach(b=>b.onclick=()=>{prof.theme=b.datase
  headers:{'Content-Type':'application/json'},body:JSON.stringify({theme:prof.theme})})});
 async function loadProfile(){prof=await (await fetch('/api/profile')).json();
  applyTheme(prof.theme);
+ document.getElementById('meav').textContent=(prof.name||'?')[0].toUpperCase();
+ document.getElementById('men').textContent=prof.name||'set up profile';
  document.getElementById('sname').value=prof.name||'';
  document.getElementById('srole').value=prof.role||'';
  document.getElementById('sprefs').value=prof.prefs||'';
@@ -688,7 +719,7 @@ document.getElementById('obgo').onclick=async()=>{
   prefs:document.getElementById('obprefs').value,theme:prof.theme||'dark'})});
  ob.classList.remove('open');loadProfile();
  add('bot','welcome aboard, '+nm+' — I will remember you. Try the chips above, or ask me anything.')};
-document.getElementById('sopen').onclick=async()=>{ss.classList.add('open');
+document.getElementById('mecard').onclick=async()=>{ss.classList.add('open');
  const h=await (await fetch('/api/help')).json();const sh=document.getElementById('shelp');
  sh.innerHTML='';Object.entries(h.topics).forEach(([k,v])=>{const d=document.createElement('div');
   d.className='htop';d.innerHTML='<b>'+k+'</b><div class=hb></div>';
@@ -736,6 +767,11 @@ function setView(v){view=v;document.body.dataset.view=v;
  wsbar.classList.toggle('on',v=='code');
  if(v!='code')wsbox.classList.remove('on');else refreshWs();
  loadChats()}
+document.querySelectorAll('.mode').forEach(b=>b.onclick=async()=>{
+ const r=await (await fetch('/api/mode',{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:b.dataset.m})})).json();
+ document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('on',x.dataset.m==r.agent_mode));
+ add('bot',r.reply)});
 document.getElementById('vchat').onclick=()=>setView('chat');
 document.getElementById('vcode').onclick=()=>setView('code');
 /* folder picker */
