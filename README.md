@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0-d97757.svg)](https://github.com/bhupendra05/termind/releases)
+[![Version](https://img.shields.io/badge/version-2.1-d97757.svg)](https://github.com/bhupendra05/termind/releases)
 [![Built on AION](https://img.shields.io/badge/built%20on-AION-8957e5.svg)](https://github.com/bhupendra05/aion)
 
 Most "local AI" setups die at the install step: venvs, Ollama, model pulls, PATH fiddling.
@@ -31,7 +31,7 @@ and binds to **localhost only** — nothing leaves your machine.
 
 ```
   ▀█▀ █▀▀ █▀█ █▀▄▀█ █ █▄░█ █▀▄
-  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v2.0.0 · local agent · on AION
+  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v2.1.0 · local agent · on AION
 
 ┌─ FEATURES ─────────────────────────────────────────────────┐
 │  just type        chat with your local model (gemma3)
@@ -59,13 +59,14 @@ termind ❯ /db delete users who never logged in
 - 🧾 **Auditable** — every action (file write, shell run, DB query, cloud escalation) is sealed into a **tamper-evident, hash-chained ledger** you can verify offline and export. `/status` and `/ledger` show the truth, including exact bytes off-machine.
 - 🗄️ **Databases, safely** — connect SQLite (zero-dependency), Postgres, MySQL, or MongoDB; ask in plain English or SQL. termind **verifies every query** and shows an `EXPLAIN` plan + exact affected-row count **before** any destructive op — and won't run it until you confirm.
 - 🛡️ **Proactive security scanning** — the moment you select a folder, termind sweeps it (offline) for exposed secrets, dangerous scripts (`curl | sh`, `rm -rf /`), and insecure deps, with file:line and a fix.
-- 👨‍💻 **A coding agent with a leash** — set a folder and it writes & runs real code in an act-observe loop, jailed to that workspace, with plan / act / bypass modes.
+- 👨‍💻 **A coding agent with a leash** — set a folder and it writes & runs real code in an act-observe loop, jailed to that workspace, with plan / act / bypass modes. Gathers all decisions in one first turn before building — no mid-task interruptions.
+- ⚡ **Real model tiers** — smart (local), smarter (bigger local via `TERMIND_BIG_MODEL`), max (frontier auto-selected on every call, every call logged). Cycle with one click on the context bar.
+- 🧰 **Bottom context bar** — folder, active DB, agent mode, model, and tier live at the bottom of the chat input (like Claude Code), always visible. One glance tells you the full agent context.
 - 🧹 **Disposable & contained** — drivers and scratch assets install into an isolated workspace venv; `/termind cleanup` prints a complete uninstall plan.
-- 🧰 **Works before the model exists** — no Ollama yet? An offline brain keeps the REPL alive and `/index` + `/ask` still do *real* retrieval.
 
 ## Tests
 ```bash
-.venv/bin/python -m pytest -q     # 152 tests
+.venv/bin/python -m pytest -q     # 164 tests
 ```
 The suite covers retrieval with source cites, the code agent's act-observe loop, the AION
 sandbox guarantee (a rogue agent's `fs.write` is denied by the kernel), the audit ledger's

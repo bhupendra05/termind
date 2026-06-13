@@ -610,3 +610,29 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. A central termind window with a bottom-dock context bar showing two pills: "📂 ~/app" and "🗄 app (sqlite)". Three labeled panels fan out: (1) a DB query card — "delete inactive users" → a yellow ⚠ preview "DELETE … — 1,284 rows affected · plan: SEARCH users" with [confirm] [cancel] buttons; (2) a security card — red "⚠ 2 issues" with rows "AWS key — config.py:1 (AKIA…MPLE)" and "curl | sh — setup.sh:3", each with a small "fix" tag; (3) a workspace card — "/termind cleanup" listing ".venv ✓, app.db ✓, models → isolate" with a green "clean uninstall" seal. A thin audit-ledger strip runs along the bottom: "db-read · db-preview · db-write · ✓ verified". Top headline in bold charcoal: **"Your data. Your machine. Every action on the record."** Subtitle: "termind v2.0 · databases + proactive security + disposable workspace · preview before destructive · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v2.1 — Master prompt + bottom context bar + tier-aware routing
+
+### 📣 Post
+
+> **termind v2.1 ships the three things I've been working toward since the very first version: a model that actually knows what it is, a UI that feels like Claude Code, and tiers that are real.**
+>
+> 🧠 **Master system prompt.** The brain inside termind now has a complete, structured picture of every capability it has — databases, scanning, code mode, frontier escalation, the audit ledger. More importantly, it has rules: gather ALL open questions in your first reply before starting any work; gate database tasks until a DB is actually connected; if a language isn't installed locally, give the code but don't try to run it. No more mid-build interruptions. No more hallucinated database connections.
+>
+> ⌨️ **Bottom context bar — like Claude Code.** The workspace folder, active database, agent mode, model, and tier now live at the **bottom of the chat input**, where they belong. One glance tells you exactly what context the agent is operating in. Click the tier chip to cycle smart → smarter → max without opening any menu.
+>
+> ⚡ **Tiers that actually route.** Smart = local model. Smarter = your bigger local model (set `TERMIND_BIG_MODEL`). Max = frontier on consent, **automatically** — no need to prefix with `/reach`, every call still logged. Set `/tier max` and every reply in chat and every code-agent step uses the frontier model, with all the usual auditing. Downgrade anytime.
+>
+> Every new feature has tests. 164 total.
+>
+> Local-first · private · $0 by default. Now smarter about what it knows.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. A termind browser window showing a Claude-style chat. At the very bottom, just above the input bar, a horizontal context strip with pill chips: "📂 ~/my-app" · "🗄 app (sqlite)" · "▶ act" · "⊕ gemma3" · "max" (the last chip glowing clay/violet). A bot reply in the chat reads: "No database is connected. Open Settings → 🗄 Databases, add your DB, then come back." Below the window, three labeled cards: a "Master Prompt" card listing bullet rules (GATHER UPFRONT, DATABASE GATE, TOOLCHAIN GATE); a "Tier: max" card showing "frontier model auto-selected · every call logged"; a "Bottom Bar" card with the same pill row. Top headline in bold charcoal: **"Knows what it can do. Shows you where it is. Routes to the right model."** Subtitle: "termind v2.1 · master prompt · bottom context bar · smart / smarter / max tiers · 164 tests." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

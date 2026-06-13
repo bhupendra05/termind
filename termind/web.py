@@ -51,6 +51,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "db": s.db_context(),                          # selected database (bottom dock)
                 "tier": s.store.get("tier", "smart"),
                 "state": getattr(s, "_state", "idle"),
+                "workspace": s.workspace(),                    # bottom bar folder chip
             }))
         if self.path.startswith("/api/chats"):
             s = self.session
@@ -483,11 +484,21 @@ body[data-view=code] #log{font-size:13.5px}
 body[data-view=code] .bot .body,body[data-view=code] .you .body{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px}
 body[data-view=code] header{border-bottom-color:color-mix(in srgb,var(--clay) 35%,var(--line))}
 /* ── code mode ── */
-#wsbar{display:none;align-items:center;gap:9px;padding:9px 22px;border-bottom:1px solid var(--line);
-background:color-mix(in srgb,var(--clay) 5%,var(--bg));animation:slidedown .3s ease}
-#wsbar.on{display:flex}
 @keyframes slidedown{from{opacity:0;transform:translateY(-8px)}to{opacity:1}}
-.wslab{font-size:10.5px;font-weight:700;letter-spacing:1.4px;color:var(--clay)}
+/* ── bottom context bar (always visible, below input) ── */
+#wsbar{display:flex;align-items:center;gap:7px;padding:5px 0 4px;flex-wrap:wrap;
+max-width:780px;margin:0 auto 6px}
+.ctxbtn{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:9px;
+border:1px solid var(--line);background:var(--card);color:var(--dim);font-size:12px;
+font-family:inherit;cursor:pointer;transition:all .15s;white-space:nowrap}
+.ctxbtn:hover{border-color:var(--clay);color:var(--clay)}
+.ctxpill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:9px;
+border:1px solid var(--line);background:var(--card);color:var(--dim);font-size:12px;
+white-space:nowrap;font-family:inherit}
+#ctxtier{cursor:pointer;transition:all .15s}
+#ctxtier:hover{border-color:var(--clay);color:var(--clay)}
+#wscodeonly{display:none;align-items:center;gap:4px}
+#wscodeonly.on{display:inline-flex}
 #wspath{flex:1;background:var(--card);border:1px solid var(--line);border-radius:9px;
 padding:7px 11px;color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:12px;outline:none}
 #wspath:focus{border-color:var(--clay)}
@@ -552,22 +563,10 @@ animation:confl .9s ease-out forwards;z-index:60}
 <header>
   <span id=title>New chat</span><span class=spacer></span>
   <span id=core><span class="dot off"></span>…</span>
-  <select id=model title="quick switch"></select>
+  <select id=model title="quick switch" style="display:none"></select>
   <button class=mbtn id=mopen>⚙ Models</button>
   <span id=clk title="local time"></span>
 </header>
-<div id=wsbar>
-  <span class=wslab>⌥ CODE</span>
-  <button class=mbtn id=wsbrowse>📂 choose folder</button>
-  <span id=wscur class=wspathpill>no workspace yet</span>
-  <span id=dbcur class=wspathpill style="display:none"></span>
-  <button class=mbtn id=wstree>📁 files</button>
-  <span class=modes>
-    <button class=mode data-m=plan title="propose only — nothing executes">📋 plan</button>
-    <button class=mode data-m=act title="actions execute">▶ act</button>
-    <button class=mode data-m=bypass title="no confirmations, auto-run everything">⚡ bypass</button>
-  </span>
-</div>
 <div class=overlay id=fp><div class=panel style="width:480px">
   <h2>📂 choose a workspace folder</h2>
   <div class=sub>navigating YOUR real folders (server-side — that's why this works)</div>
@@ -715,6 +714,23 @@ animation:confl .9s ease-out forwards;z-index:60}
   <div style="text-align:right;margin-top:14px"><button class=mbtn id=mclose>Close</button></div>
 </div></div>
 <footer>
+  <div id=wsbar>
+    <button class=ctxbtn id=wsbrowse>📂</button>
+    <span id=wscur class=ctxpill>no folder</span>
+    <span id=dbcur class=ctxpill style="display:none"></span>
+    <span id=wscodeonly>
+      <span class=modes>
+        <button class=mode data-m=plan title="propose only — nothing executes">📋 plan</button>
+        <button class=mode data-m=act title="actions execute">▶ act</button>
+        <button class=mode data-m=bypass title="no confirmations, auto-run everything">⚡ bypass</button>
+      </span>
+      <button class=ctxbtn id=wstree>📁 files</button>
+    </span>
+    <span style=flex:1></span>
+    <button class=ctxbtn id=ctxmodbtn title="click to open Models">⊕ <span id=ctxmod>—</span></button>
+    <span class=ctxpill id=ctxtier title="click to cycle tier: smart → smarter → max">smart</span>
+    <span class=ctxpill>🔒 ask</span>
+  </div>
   <div id=imgchip style="max-width:760px;margin:0 auto 6px;display:none;align-items:center;gap:8px;color:var(--dim);font-size:12px">
     <img id=imgprev style="height:42px;border-radius:8px;border:1px solid var(--line)"/>
     <span id=imgname></span>
@@ -784,14 +800,26 @@ async function loadChats(){const d=await (await fetch('/api/chats?mode='+view)).
 async function state(){const s=await (await fetch('/api/state')).json();
  ver.textContent='v'+s.version;
  core.innerHTML='<span class="dot '+(s.live?'live':'off')+'"></span>'+(s.live?s.model:'offline');
-document.querySelectorAll('.mode').forEach(b=>b.classList.toggle('on',b.dataset.m==s.agent_mode));
-document.getElementById('warn').style.display=s.live?'none':'block';
+ document.querySelectorAll('.mode').forEach(b=>b.classList.toggle('on',b.dataset.m==s.agent_mode));
+ document.getElementById('warn').style.display=s.live?'none':'block';
  sel.innerHTML='';s.models.forEach(m=>{const o=document.createElement('option');o.value=m;
- o.textContent=m;if(m.split(':')[0]==s.model.split(':')[0])o.selected=true;sel.appendChild(o)});
- const dc=document.getElementById('dbcur');if(dc){if(s.db){dc.textContent='🗄 '+s.db;dc.style.display='inline-block'}else{dc.style.display='none'}}}
+  o.textContent=m;if(m.split(':')[0]==s.model.split(':')[0])o.selected=true;sel.appendChild(o)});
+ const dc=document.getElementById('dbcur');
+ if(dc){if(s.db){dc.textContent='🗄 '+s.db;dc.style.display='inline-flex'}else{dc.style.display='none'}}
+ const tc=document.getElementById('ctxtier');if(tc)tc.textContent=s.tier||'smart';
+ const mc=document.getElementById('ctxmod');if(mc)mc.textContent=(s.model||'—').split(':')[0];
+ const wsc=document.getElementById('wscur');if(wsc&&wsc.textContent==='no folder'&&s.workspace)wsc.textContent=s.workspace}
 sel.onchange=async()=>{const b=await (await fetch('/api/model',{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value})})).json();
- add('bot',b.reply);state()}
+ add('bot',b.reply);state()};
+document.getElementById('ctxmodbtn').onclick=()=>{mm.classList.add('open');renderModels()};
+document.getElementById('ctxtier').onclick=async()=>{
+ const tiers=['smart','smarter','max'];
+ const cur=document.getElementById('ctxtier').textContent.trim();
+ const next=tiers[(tiers.indexOf(cur)+1)%tiers.length];
+ const r=await (await fetch('/api/tier',{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:next})})).json();
+ add('bot',r.reply);state()}
 document.getElementById('new').onclick=()=>chatOp({op:'new'});
 let view='chat';
 let busy=false,img=null,imgName='',imgURL='';
@@ -1015,13 +1043,13 @@ const clk=document.getElementById('clk');
 setInterval(()=>{const d=new Date();
  clk.textContent=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
  clk.title=d.toDateString()},1000);
-/* code mode */
+/* bottom bar */
 const wsbar=document.getElementById('wsbar'),wsbox=document.getElementById('wstreebox'),
 wscur=document.getElementById('wscur');
 function setView(v){view=v;document.body.dataset.view=v;
  document.getElementById('vchat').classList.toggle('on',v=='chat');
  document.getElementById('vcode').classList.toggle('on',v=='code');
- wsbar.classList.toggle('on',v=='code');
+ document.getElementById('wscodeonly').classList.toggle('on',v=='code');
  if(v!='code')wsbox.classList.remove('on');else refreshWs();
  loadChats()}
 document.querySelectorAll('.mode').forEach(b=>b.onclick=async()=>{

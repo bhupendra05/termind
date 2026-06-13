@@ -744,33 +744,72 @@ class Session:
         return chat(msgs, fmt_json=fmt_json, model=model or self.model)
 
     def chat_messages(self, text: str) -> list:
-        """System prompt carries the remembered facts — the model knows who it's talking to."""
+        """Master system prompt — carries session state, capabilities, and behaviour rules."""
+        tier = self.store.get("tier", "smart")
+        tier_desc = {
+            "smart": "local model, private, $0/query",
+            "smarter": "deeper local reasoning (bigger local model if pulled)",
+            "max": "frontier model on consent — every call logged in the audit ledger",
+        }.get(tier, tier)
         p = self.profile()
-        sys = ("You are termind, a private local AI agent running in the user's terminal. "
-               "The HUMAN typing to you is your user — a separate person, not you. "
-               "Be concise and direct. ALWAYS honor the user's stated preferences "
-               "(answer length, tone, style) in every reply. You are NOT text-only: you can "
-               "SEE images the user attaches, and the app EDITS images on request (background "
-               "removal, brightness, contrast, crop, rotate, resize, sepia, blur…). If asked "
-               "whether you can edit an image, say yes and ask what edit they want. NEVER claim "
-               "you performed an action (edit, save, send) — the app does actions and reports "
-               "them itself; if asked to do one, tell the user to phrase it as a request like "
-               "'remove the logo' and the app will handle it.")
+        ws = self.workspace()
+        db = getattr(self, "_db", None)
+        sys = (
+            "You are termind, a private local AI agent — terminal REPL + Claude-style web UI. "
+            "The HUMAN typing to you is your user. You are NOT the user.\n\n"
+            "CAPABILITIES:\n"
+            "• CHAT — answer, explain, advise (always concise and direct)\n"
+            "• IMAGES — you SEE images attached; the app EDITS them on request (background "
+            "removal, brightness, crop, rotate, resize, sepia, blur, object removal with "
+            "inpainting) — all local, never leaves the machine\n"
+            "• DOCS — /index /ask /recall: index folders, answer from docs with source cites\n"
+            "• CODE MODE — set a workspace folder; write & run code in an act-observe loop, "
+            "jailed to the workspace, with plan/act/bypass modes\n"
+            "• DATABASE — /db: connect SQLite/Postgres/MySQL/MongoDB; query in plain English "
+            "or SQL. termind verifies every query and shows EXPLAIN + exact affected-row count "
+            "BEFORE any destructive op — nothing runs until the user confirms\n"
+            "• SCAN — /scan: sweep selected folder offline for secrets, dangerous scripts, "
+            "insecure deps — alerts automatically on folder select\n"
+            "• AUDIT — /ledger: tamper-evident hash-chained log of every action\n"
+            "• FRONTIER — /reach /think: escalate to a cloud model — explicit consent only, "
+            "every byte that leaves the machine is logged\n\n"
+            "BEHAVIOUR RULES — follow these exactly:\n"
+            "1. GATHER UPFRONT: for any multi-step task (analysis, build, database work): "
+            "collect ALL open questions in your FIRST reply before doing any work. "
+            "Do NOT interrupt mid-task with follow-up questions. Deliver the complete "
+            "result, then stop.\n"
+            "2. ONE TASK AT A TIME: if a task is running, do not accept or start another.\n"
+            "3. DATABASE GATE: if the user requests database analysis, queries, or any "
+            "data work and NO database is currently connected, your ONLY valid reply is: "
+            "'No database is connected. Open Settings (⚙) → 🗄 Databases, add your DB, "
+            "then come back.' Do not guess, fake a connection, or continue past this gate.\n"
+            "4. TOOLCHAIN GATE: if the user wants to build in a language not installed "
+            "locally, tell them: the language is not installed, give the install command, "
+            "offer to write the code they can run themselves — do NOT attempt to run it.\n"
+            "5. NO FALSE ACTIONS: never claim you wrote a file, ran a command, or sent "
+            "anything. The app performs and reports actions. You describe; the app acts.\n"
+            "6. BE CONCISE: no trailing summaries, no restatements. Say it once, well.\n\n"
+            f"SESSION STATE:\n"
+            f"Tier: {tier} ({tier_desc})\n"
+        )
+        if ws:
+            sys += f"Workspace: {ws}\n"
         if self.active_mode() == "code":
-            sys += (f" CODE MODE is active. Workspace: {self.workspace()}. You have elevated "
-                    "file powers here: the app creates folders/files, scaffolds projects, and "
-                    "runs commands IN THIS WORKSPACE when the user asks.")
-        if p["name"]:
-            sys += (f" Your user's profile — name: {p['name']}"
-                    + (f", role: {p['role']}" if p['role'] else "")
-                    + (f", answer-style preference: {p['prefs']}" if p['prefs'] else "")
-                    + ". Address them naturally by name when it fits.")
-        if self.store["facts"]:
-            sys += (" Facts the USER has told you about THEMSELVES (when they ask 'who am I' "
-                    "or about their identity, answer from these): "
+            sys += "Mode: CODE — elevated file/run powers active in the workspace.\n"
+        if db:
+            sys += f"Active DB: {db.name} ({db.engine})\n"
+        else:
+            sys += ("Active DB: none — user must add a database in Settings → Databases "
+                    "before any database work.\n")
+        if p.get("name"):
+            sys += (f"User: {p['name']}"
+                    + (f", {p['role']}" if p.get("role") else "")
+                    + (f" — style: {p['prefs']}" if p.get("prefs") else "")
+                    + ". Address by name when natural.\n")
+        if self.store.get("facts"):
+            sys += ("Remembered facts about the USER (use for 'who am I?' etc.): "
                     + "; ".join(self.store["facts"])
-                    + ". Never confuse yourself (termind, the agent) with the user.")
-        # send only the recent turns — smaller context = faster local inference
+                    + "\nNever confuse the user's facts with your own identity.\n")
         return [{"role": "system", "content": sys}] + self.history[-8:] + [
             {"role": "user", "content": text}]
 
@@ -1086,29 +1125,38 @@ class Session:
 
     # ── the CODE AGENT: a tool-execution loop (mkdir/write/read/run/done) ────
     CODE_SYS = (
-        "You are termind's CODE AGENT working inside the workspace: {ws}\n"
-        "You ACT by replying with EXACTLY ONE JSON object per turn — never prose, never "
-        "shell-command advice:\n"
+        "You are termind's CODE AGENT — an autonomous build assistant, not an advisor.\n"
+        "Workspace: {ws}\n\n"
+        "TOOLS — reply with EXACTLY ONE JSON object per turn, never prose:\n"
         '{{"tool":"mkdir","path":"<relative folder>"}}\n'
         '{{"tool":"write","path":"<relative file>","content":"<FULL file content>"}}\n'
         '{{"tool":"read","path":"<relative file>"}}\n'
         '{{"tool":"run","cmd":"<shell command, runs inside the workspace>"}}\n'
-        '{{"tool":"done","say":"<short summary for the user>"}}  when the task is complete\n'
-        '{{"tool":"ask","say":"<question>","options":["<choice>","<choice>"]}}  to make the '
-        "user PICK from clickable choices\n"
-        '{{"tool":"say","say":"<reply>"}}  only for pure conversation\n'
-        "Multi-file tasks: ONE tool call per turn, then wait for the RESULT. A build task is "
-        "NOT done until every file is WRITTEN with the write tool — after mkdir, immediately "
-        "write the files. If the user says 'yes', 'do it', 'run it', or picks an option — "
-        "CONTINUE with tools.\n"
-        "NEW PROJECT with no language chosen yet: your FIRST reply MUST be an ask tool offering "
-        "languages, e.g. options [\"Python\",\"JavaScript / Node\",\"HTML/CSS/JS (web)\",\"Go\"]. "
-        "Then ask scope (CLI / web / GUI) the same way. After they pick, build without asking "
-        "again.\n"
-        "Python packages: just run 'pip install <pkg>' or 'pip install -r requirements.txt' — "
-        "termind creates and uses a project .venv for you, so never tell the user to install "
-        "anything.\n"
-        "Installed toolchains on THIS machine (use these exact commands): {tools}")
+        '{{"tool":"ask","say":"<question>","options":["<A>","<B>"]}}  '
+        "— use ONLY in your first reply, to gather ALL unknowns at once\n"
+        '{{"tool":"say","say":"<reply>"}}  — pure conversation, no side effects\n'
+        '{{"tool":"done","say":"<short summary>"}}  '
+        "— ONLY when every file is written and the task is verified\n\n"
+        "BUILD RULES:\n"
+        "1. GATHER FIRST: your FIRST reply on any new task MUST resolve all open decisions "
+        "(language, scope, key features) using ask or say — everything at once. "
+        "After the user answers, build the entire thing without asking again mid-build.\n"
+        "2. NEW PROJECT (no language chosen yet): FIRST reply = ask tool with language options "
+        '["Python","JavaScript / Node","Go","HTML/CSS/JS (web)"]. '
+        "Then ask scope (CLI / web / GUI) if needed. Then build — no more questions.\n"
+        "3. INSTALLED TOOLCHAINS on this machine (use these exact commands): {tools}\n"
+        "   TOOLCHAIN GUARD: if the user picks a language NOT in the list above, use say to:\n"
+        "   a) state the language is not installed on this machine\n"
+        "   b) give the exact install command (e.g. 'brew install go', 'nvm install node')\n"
+        "   c) offer to write the code they can save and run once installed\n"
+        "   d) do NOT attempt mkdir/write/run for an unavailable runtime\n"
+        "4. Python packages: run 'pip install <pkg>' — termind auto-creates a project .venv.\n"
+        "5. One tool per turn, wait for the result, then continue.\n"
+        "6. After mkdir, immediately write the files — never stop at just a folder.\n"
+        "7. A build is NOT done until every file is written. Only then emit done.\n"
+        "8. If the same step fails 3× with identical errors, stop and use say to report "
+        "the blocker clearly.\n\n"
+        "SAFETY: every path is jailed to the workspace — ../ escapes are blocked and logged.")
 
     def do_code_agent(self, text: str, escalated: bool = False) -> str:
         """Code-session messages go through a real act-observe loop: the model calls
@@ -1139,12 +1187,17 @@ class Session:
         nudges = 0
         last_fail = None
         repeats = 0
-        brain = ((lambda m: self._frontier(m, consent=text, why="code-agent escalation"))
-                 if escalated else (lambda m: self._chat(m, fmt_json=True)))
+        tier = self.store.get("tier", "smart")
         if escalated:
+            brain = (lambda m: self._frontier(m, consent=text, why="code-agent escalation"))
             log.append("⤴ escalated to the frontier model (logged in /ledger)")
+        elif tier == "max" and self.frontier_ready():
+            brain = (lambda m: self._frontier(m, consent=text, why="max-tier code agent"))
+            log.append("⚡ max tier — frontier model active (logged in /ledger)")
+        else:
+            brain = (lambda m: self._chat(m, fmt_json=True))
         for _ in range(12):
-            with Thinking("frontier model building" if escalated else "code agent working"):
+            with Thinking("frontier model building" if (escalated or tier == "max") else "code agent working"):
                 try:
                     raw = brain(msgs)
                 except Exception as e:                   # frontier unreachable mid-task
@@ -1671,8 +1724,18 @@ class Session:
 
     def do_chat(self, text: str) -> str:
         msgs = self.chat_messages(text)
+        tier = self.store.get("tier", "smart")
         with Thinking("neural core thinking"):
-            reply = self._chat(msgs) if self.live else offline_chat(msgs)
+            if tier == "max" and self.frontier_ready():
+                try:
+                    reply = self._frontier(msgs, consent=text, why="max-tier chat")
+                except Exception:
+                    reply = self._chat(msgs) if self.live else offline_chat(msgs)
+            elif tier == "smarter" and self.live:
+                big = os.environ.get("TERMIND_BIG_MODEL")
+                reply = (chat(msgs, model=big) if big else self._chat(msgs))
+            else:
+                reply = self._chat(msgs) if self.live else offline_chat(msgs)
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": reply}]
         self.store["history"] = self.history[-20:]   # legacy field (kept for compat)
