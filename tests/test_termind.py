@@ -1322,3 +1322,69 @@ def test_settings_sections_and_toolchain_api():
     d = json.loads(urllib.request.urlopen(url + "/api/toolchain", timeout=3).read())
     assert "python" in d["toolchain"]
     httpd.server_close()
+
+
+def test_ask_tool_offers_clickable_options(tmp_path, monkeypatch):
+    """v0.19: the agent can PICK-list — sets last_options + lists them in the reply."""
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"tool": "ask", "say": "Which language do you want?",
+         "options": ["Python", "JavaScript / Node", "HTML/CSS/JS (web)"]}))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s.handle_web("build me a calculator")
+    assert s.last_options == ["Python", "JavaScript / Node", "HTML/CSS/JS (web)"]
+    assert "Which language" in out and "1. Python" in out          # terminal sees choices too
+    assert "step limit" not in out and not (tmp_path / "calculator").exists()
+
+
+def test_ask_options_clear_on_next_turn(tmp_path, monkeypatch):
+    """Stale quick-replies must never leak into a later chat/build turn."""
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"tool": "ask", "say": "CLI or web?", "options": ["CLI", "Web"]}))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    s.handle_web("make a thing")
+    assert s.last_options == ["CLI", "Web"]
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"tool": "done", "say": "all set"}))
+    s.handle_web("Web")                                           # they picked → fresh turn
+    assert s.last_options == []                                   # cleared, no leak
+
+
+def test_pip_install_routes_to_project_venv(tmp_path):
+    """v0.19 PEP-668 fix: pip installs go into a project .venv, never system python."""
+    s = _session()
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    routed = s._venv_route("pip3 install -r requirements.txt")
+    assert routed.endswith("/pip install -r requirements.txt")
+    assert ".venv/bin/pip install" in routed
+    assert (tmp_path / ".venv" / "bin" / "pip").exists()          # venv really created
+    # variants all normalize to the same venv pip
+    assert s._venv_route("pip install flask").endswith("/pip install flask")
+    assert s._venv_route("python3 -m pip install flask").endswith("/pip install flask")
+    # non-pip commands are untouched
+    assert s._venv_route("python3 app.py") == "python3 app.py"
+
+
+def test_send_api_returns_clickable_options(tmp_path, monkeypatch):
+    """The web /api/send response carries options so the UI can render quick-reply chips."""
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve, PAGE
+    assert "qchip" in PAGE and "r.options" in PAGE                # UI wiring present
+    monkeypatch.setattr(r, "chat", lambda *a, **k: json.dumps(
+        {"tool": "ask", "say": "Which language?", "options": ["Python", "Go"]}))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    httpd, url = serve(s, port=8822, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    req = urllib.request.Request(url + "/api/send",
+        data=json.dumps({"text": "build a calculator", "mode": "code"}).encode(),
+        headers={"Content-Type": "application/json"})
+    d = json.loads(urllib.request.urlopen(req, timeout=5).read())
+    assert d["options"] == ["Python", "Go"]
+    httpd.server_close()

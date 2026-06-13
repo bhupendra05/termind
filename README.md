@@ -27,7 +27,7 @@ and binds to **localhost only** — nothing leaves your machine.
 
 ```
   ▀█▀ █▀▀ █▀█ █▀▄▀█ █ █▄░█ █▀▄
-  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v0.8.0 · local agent · on AION
+  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v0.19.0 · local agent · on AION
 
 ┌─ FEATURES ─────────────────────────────────────────────────┐
 │  just type        chat with your local model (gemma3)

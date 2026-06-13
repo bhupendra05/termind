@@ -42,11 +42,12 @@ def _version(cmd: str, lang: str):
         r = subprocess.run([cmd, flag], capture_output=True, text=True, timeout=6)
     except Exception:
         return None
-    text = (r.stdout or r.stderr or "").strip()
+    # be defensive: a malformed probe result must never crash REPL boot
+    text = ((getattr(r, "stdout", "") or getattr(r, "stderr", "")) or "").strip()
     m = re.search(r"\d+(?:\.\d+)+", text)
     if m:
         return m.group(0)
-    if any(x in text.lower() for x in _NOT_INSTALLED) or r.returncode != 0:
+    if any(x in text.lower() for x in _NOT_INSTALLED) or getattr(r, "returncode", 0) != 0:
         return None
     return (text.splitlines() or ["?"])[0][:30]
 

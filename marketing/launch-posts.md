@@ -465,3 +465,27 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind Settings panel in Claude style — a left nav (Profile, Appearance, Memory, **Toolchains** highlighted, Help, About) and a main pane listing auto-detected runtimes as monospace rows: "python → python3 · 3.14 · /usr/bin", "node → node · 23.7", "rust → cargo · 1.91", "git → 2.50", each with a green check. A small inset chat shows "cd app && python main.py" being rewritten to "python3 main.py ✓". Top headline in bold charcoal: **"Your agent knows what your machine speaks."** Subtitle: "termind v0.18 · toolchain auto-detection · smart command rewriting · asks before building · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.19 — Click to answer + pip that actually works (PEP-668 killed)
+
+### 📣 Post
+
+> **Two small things that made my local coding agent feel pro overnight: it now asks questions you click to answer — and it can finally install Python packages on a Mac without faceplanting.**
+>
+> 💬 **Clickable choices, like Claude gives you in chat** — start a build and the agent's FIRST move is a question with buttons: *Which language? — Python · JavaScript / Node · HTML/CSS/JS · Go*. Click one, then pick scope (CLI / web / GUI). No more guessing what you meant; no more typing "python" three times. (Terminal users get a clean numbered list.)
+> 📦 **pip that works on macOS** — `pip install -r requirements.txt` used to die with "externally-managed-environment" (PEP 668) and the agent would flail trying to reinstall Flask by hand. Now termind silently creates a project `.venv` and routes every install + run through it. I re-ran the EXACT transcript that failed — it installs cleanly now.
+> 🐛 **Squashed a sneaky web bug** — a response variable was scoped to a try-block but read outside it, so every send quietly threw after rendering and skipped the chat refresh. Hoisted + guarded.
+>
+> The pattern I keep relearning: small models don't need a bigger brain, they need better *hands and a better interface*. Buttons instead of free-text. A venv instead of a lecture.
+>
+> Local · private · $0 · 124 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #ClaudeCode #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. LEFT: the termind chat — a bot bubble asks "Which language do you want?" with three crisp clickable chips below it ("Python" highlighted in clay, "JavaScript / Node", "HTML/CSS/JS (web)"), a cursor hovering the lit one. RIGHT: a terminal/run panel showing "$ .venv/bin/pip install -r requirements.txt" then "Successfully installed flask ✓" in green, with a small faded "externally-managed-environment ✗" crossed out behind it. A tiny folder glyph ".venv/" sits between them with a green check. Top headline in bold charcoal: **"Click to answer. pip that just works."** Subtitle: "termind v0.19 · clickable choices · auto-venv installs (PEP-668 fixed) · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

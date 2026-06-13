@@ -267,6 +267,7 @@ class Session:
             if cid else list(self.store["history"])
         self.actions = 0
         self.last_image = None       # (name, base64) of the most recent image, for /edit
+        self.last_options = []       # clickable quick-reply choices the agent offered
         self._pending_remove = None  # target of a failed removal awaiting "where is it"
         self.pull = {"status": "idle"}  # background model download state (web progress bar)
         # toolchain: detect once, cache for a week (what languages this machine speaks)
@@ -612,6 +613,7 @@ class Session:
 
     def _code_route(self, text: str):
         """Code sessions: every plain message goes through the tool-execution loop."""
+        self.last_options = []   # both terminal + web enter here first → never leak stale chips
         in_code = getattr(self, "view_mode", "chat") == "code" or self.active_mode() == "code"
         m = EDIT_FILE.match(text)
         if m and os.path.isfile(os.path.join(self.workspace(), m.group(1))):
@@ -1030,18 +1032,26 @@ class Session:
         '{{"tool":"read","path":"<relative file>"}}\n'
         '{{"tool":"run","cmd":"<shell command, runs inside the workspace>"}}\n'
         '{{"tool":"done","say":"<short summary for the user>"}}  when the task is complete\n'
-        '{{"tool":"say","say":"<reply>"}}  only for pure conversation/questions\n'
+        '{{"tool":"ask","say":"<question>","options":["<choice>","<choice>"]}}  to make the '
+        "user PICK from clickable choices\n"
+        '{{"tool":"say","say":"<reply>"}}  only for pure conversation\n'
         "Multi-file tasks: ONE tool call per turn, then wait for the RESULT. A build task is "
         "NOT done until every file is WRITTEN with the write tool — after mkdir, immediately "
-        "write the files. If the user says 'yes', 'do it', 'run it' — CONTINUE with tools.\n"
-        "NEW PROJECT requests with no language/details chosen: FIRST use the say tool to ask "
-        "2-3 short questions (which language? CLI or web? key features?). After they answer, "
-        "build immediately without asking again. Installed toolchains on THIS machine "
-        "(use these exact commands): {tools}")
+        "write the files. If the user says 'yes', 'do it', 'run it', or picks an option — "
+        "CONTINUE with tools.\n"
+        "NEW PROJECT with no language chosen yet: your FIRST reply MUST be an ask tool offering "
+        "languages, e.g. options [\"Python\",\"JavaScript / Node\",\"HTML/CSS/JS (web)\",\"Go\"]. "
+        "Then ask scope (CLI / web / GUI) the same way. After they pick, build without asking "
+        "again.\n"
+        "Python packages: just run 'pip install <pkg>' or 'pip install -r requirements.txt' — "
+        "termind creates and uses a project .venv for you, so never tell the user to install "
+        "anything.\n"
+        "Installed toolchains on THIS machine (use these exact commands): {tools}")
 
     def do_code_agent(self, text: str) -> str:
         """Code-session messages go through a real act-observe loop: the model calls
         tools, termind EXECUTES them, results feed back. No more command-printing."""
+        self.last_options = []       # fresh turn → clear any prior quick-replies
         if self.agent_mode == "plan":
             return self.do_plan(text)
         sys_p = self.CODE_SYS.format(ws=self.workspace(),
@@ -1062,6 +1072,12 @@ class Session:
             if "final" in act and "tool" not in act:    # prose → treat as conversation
                 act = {"tool": "say", "say": act["final"]}
             tool = str(act.get("tool", "")).lower()
+            if tool == "ask":                        # clarifying question with clickable choices
+                opts = [str(o) for o in (act.get("options") or [])][:6]
+                self.last_options = opts              # web renders these as quick-reply chips
+                q = str(act.get("say") or "Which option?")
+                final = q + "".join(f"\n  {i}. {o}" for i, o in enumerate(opts, 1))
+                break
             if tool in ("done", "say") or ("say" in act and not tool):
                 wrote = any(line.startswith("✓ write") for line in log)
                 buildish = re.search(r"\b(create|build|make|website|project|app|tool|script)\b",
@@ -1147,11 +1163,33 @@ class Session:
     def _ws_filelist(self, limit: int = 25) -> str:
         return ", ".join(e["path"] for e in self.ws_tree(limit) if not e["dir"])
 
+    def _ensure_venv(self) -> str:
+        """A project .venv so pip installs work on macOS (PEP 668) — created on demand."""
+        vbin = os.path.join(self.workspace(), ".venv", "bin")
+        if not os.path.isdir(vbin):
+            py = (self.toolchain.get("python") or {}).get("cmd", "python3")
+            try:
+                subprocess.run([py, "-m", "venv", ".venv"], cwd=self.workspace(),
+                               capture_output=True, text=True, timeout=120)
+            except Exception:
+                return ""
+        return vbin if os.path.isdir(vbin) else ""
+
+    def _venv_route(self, cmd: str) -> str:
+        """pip install … → into the project .venv (fixes macOS 'externally-managed-environment')."""
+        if re.match(r"\s*(?:python3?\s+-m\s+)?pip3?\s+install\b", cmd, re.I):
+            vbin = self._ensure_venv()
+            if vbin:
+                rest = re.sub(r"^\s*(?:python3?\s+-m\s+)?pip3?\s+install\b", "", cmd, 1, re.I)
+                return f"{vbin}/pip install" + rest
+        return cmd
+
     def _agent_run(self, cmd: str) -> str:
-        cmd = self._fix_lang_cmds(cmd)
+        cmd = self._venv_route(self._fix_lang_cmds(cmd))
         tok = cmd.split()
         ws = self.workspace()
-        compound = "&&" in cmd or ";" in cmd or cmd.strip().startswith("cd ")
+        compound = ("&&" in cmd or ";" in cmd or cmd.strip().startswith("cd ")
+                    or ".venv/bin/" in cmd)
         # "app.py" or a wrong absolute path → find the real file in the workspace
         if tok and tok[0].endswith(".py"):
             cand = tok[0]

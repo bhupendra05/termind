@@ -92,6 +92,8 @@ class _Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     out = f"error: {e}"
             resp = {"reply": _strip_ansi(out)}
+            if self.session.last_options:       # clarifying question → clickable quick-replies
+                resp["options"] = self.session.last_options
             # an edit happened or the user asked to see it → return the actual image
             if self.session.last_image and (out.startswith("applied")
                                             or out.startswith("here's the current image")):
@@ -290,6 +292,13 @@ margin-left:auto;margin-right:auto}
 color:var(--ink);font-size:13px;cursor:pointer;transition:all .16s ease}
 .chip:hover{border-color:var(--clay);color:var(--clay);transform:translateY(-1px);
 box-shadow:0 4px 12px var(--ring)}
+/* clarifying quick-reply chips (Claude-style clickable choices under a bot bubble) */
+.quick{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.qchip{border:1px solid var(--clay);background:var(--card);border-radius:11px;padding:8px 14px;
+color:var(--clay);font-size:13px;font-weight:600;cursor:pointer;transition:all .16s ease;
+animation:fade .25s ease}
+.qchip:hover{background:var(--clay);color:#fff;transform:translateY(-1px);
+box-shadow:0 5px 14px var(--ring)}
 /* ───────── composer ───────── */
 footer{padding:10px 22px 20px}
 .inbar{max-width:780px;margin:0 auto;display:flex;gap:10px;align-items:flex-end;
@@ -694,16 +703,20 @@ async function send(t){if(busy||(!t.trim()&&!img))return;busy=true;go.disabled=t
   body.appendChild(im)}
  inp.value='';inp.style.height='auto';
  const b=add('bot','');b.innerHTML='<span class=typing><i></i><i></i><i></i></span>';
- try{const r=await (await fetch('/api/send',{method:'POST',
+ let r;
+ try{r=await (await fetch('/api/send',{method:'POST',
   headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,image:img,image_name:imgName,mode:view})})).json();
   img=null;imgName='';imgURL='';chip.style.display='none';file.value='';
   b.innerHTML=r.reply=='__EXIT__'?'<span class=think>session closed.</span>':fmt(r.reply||'(no output)');
   if(r.image){const im=document.createElement('img');im.src='data:image/png;base64,'+r.image;
    im.style.cssText='display:block;max-width:320px;border-radius:10px;margin-top:10px;background:repeating-conic-gradient(#444 0 25%,#555 0 50%) 0 0/16px 16px';
-   b.appendChild(im)}}
+   b.appendChild(im)}
+  if(r.options&&r.options.length){const q=document.createElement('div');q.className='quick';
+   r.options.forEach(o=>{const c=document.createElement('button');c.className='qchip';c.textContent=o;
+    c.onclick=()=>{q.remove();send(o)};q.appendChild(c)});b.appendChild(q)}}
  catch(e){b.innerHTML='<span class=think>error: '+e+'</span>'}
  busy=false;go.disabled=false;inp.focus();
- if(/^(applied|built|created|wrote|imported|removed|saved|switched|renamed|workspace set)/.test(r.reply||'')){
+ if(r&&/^(applied|built|created|wrote|imported|removed|saved|switched|renamed|workspace set)/.test(r.reply||'')){
   const m=b.closest('.msg');m.classList.add('done-glow');celebrate(b)}
  const d=await (await fetch('/api/chats')).json();renderChats(d);
  log.scrollTop=log.scrollHeight}
