@@ -1543,3 +1543,68 @@ def test_reach_over_web_routes_and_logs(monkeypatch):
     assert "web frontier answer" in out
     esc = [e for e in s.ledger.entries if e["tool"] == "escalate"]
     assert len(esc) == 1 and esc[0]["bytes"] > 0           # the web path is audited too
+
+
+# ──────────────── v0.22 — Escalate-in-the-loop (stuck local → frontier, on consent) ────────────────
+def test_stuck_local_offers_escalation_when_key_present(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"tool": "write", "path": "../escape.py", "content": "x=1"}))   # always jail-blocked
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s.handle_web("build a thing")
+    assert "escalate" in out.lower()                           # offers the frontier instead of giving up
+    assert s.last_options == ["⤴ Escalate this step to Claude", "Keep it local"]
+    assert s._stuck_task == "build a thing"
+
+
+def test_stuck_without_key_just_gives_up_locally(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"tool": "write", "path": "../escape.py", "content": "x=1"}))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s.handle_web("build a thing")
+    assert "stopped retrying" in out and not s.last_options    # no key → no cloud chip
+
+
+def test_escalation_runs_frontier_brain_and_logs_every_step(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(    # local model is hopeless
+        {"tool": "write", "path": "../escape.py", "content": "x=1"}))
+    fseq = iter([                                                  # frontier model is competent
+        _json.dumps({"tool": "write", "path": "app.py", "content": "print('hi')\n"}),
+        _json.dumps({"tool": "done", "say": "built it with the frontier model"}),
+    ])
+    monkeypatch.setattr(r, "claude_chat", lambda msgs: next(fseq))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    s.handle_web("build a hello app")                             # gets stuck → offers escalation
+    assert s._stuck_task == "build a hello app"
+    out = s.handle_web("⤴ Escalate this step to Claude")          # user consents
+    assert "built it with the frontier model" in out
+    assert (tmp_path / "app.py").read_text().startswith("print")  # frontier actually built it
+    esc = [e for e in s.ledger.entries if e["tool"] == "escalate"]
+    assert esc and all(e["consent"] == "build a hello app" for e in esc)  # original task authorized it
+    assert s.ledger.verify()["ok"] and s._stuck_task is None
+    assert "consented cloud escalation" in s.do_status()          # off-machine bytes now truthful
+
+
+def test_keep_it_local_declines_escalation(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"tool": "write", "path": "../escape.py", "content": "x=1"}))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    s.handle_web("build a thing")
+    out = s.handle_web("Keep it local")
+    assert "Staying local" in out and s._stuck_task is None
+    assert not any(e["tool"] == "escalate" for e in s.ledger.entries)   # nothing left the machine

@@ -272,6 +272,7 @@ class Session:
         self.last_image = None       # (name, base64) of the most recent image, for /edit
         self.last_options = []       # clickable quick-reply choices the agent offered
         self._pending_remove = None  # target of a failed removal awaiting "where is it"
+        self._stuck_task = None       # a build the local model stalled on, awaiting escalate consent
         self.pull = {"status": "idle"}  # background model download state (web progress bar)
         # toolchain: detect once, cache for a week (what languages this machine speaks)
         tc = self.store.get("toolchain") or {}
@@ -1095,10 +1096,21 @@ class Session:
         "anything.\n"
         "Installed toolchains on THIS machine (use these exact commands): {tools}")
 
-    def do_code_agent(self, text: str) -> str:
+    def do_code_agent(self, text: str, escalated: bool = False) -> str:
         """Code-session messages go through a real act-observe loop: the model calls
-        tools, termind EXECUTES them, results feed back. No more command-printing."""
+        tools, termind EXECUTES them, results feed back. No more command-printing.
+        When the local model gets stuck it can be ESCALATED (on consent) to a frontier
+        model for the rest of the task — every step logged in the audit ledger."""
         self.last_options = []       # fresh turn → clear any prior quick-replies
+        stuck = getattr(self, "_stuck_task", None)
+        if stuck and re.search(r"keep it local", text, re.I):
+            self._stuck_task = None
+            return "Staying local. Try 'write a simpler version', or split it into smaller files."
+        if stuck and re.search(r"escalat", text, re.I):   # user clicked the escalate chip
+            text, escalated = stuck, True
+            self._stuck_task = None
+        elif stuck:
+            self._stuck_task = None                        # moved on → drop the stale offer
         if self.agent_mode == "plan":
             return self.do_plan(text)
         sys_p = self.CODE_SYS.format(ws=self.workspace(),
@@ -1113,9 +1125,18 @@ class Session:
         nudges = 0
         last_fail = None
         repeats = 0
+        brain = ((lambda m: self._frontier(m, consent=text, why="code-agent escalation"))
+                 if escalated else (lambda m: self._chat(m, fmt_json=True)))
+        if escalated:
+            log.append("⤴ escalated to the frontier model (logged in /ledger)")
         for _ in range(12):
-            with Thinking("code agent working"):
-                act = parse_action(self._chat(msgs, fmt_json=True))
+            with Thinking("frontier model building" if escalated else "code agent working"):
+                try:
+                    raw = brain(msgs)
+                except Exception as e:                   # frontier unreachable mid-task
+                    final = f"frontier unreachable: {e} — the task stays where the local model left it."
+                    break
+            act = parse_action(raw)
             if "final" in act and "tool" not in act:    # prose → treat as conversation
                 act = {"tool": "say", "say": act["final"]}
             tool = str(act.get("tool", "")).lower()
@@ -1167,8 +1188,15 @@ class Session:
                 repeats = 0
             last_fail = short if failed else None
             if repeats >= 2:                        # same failure 3x → stop the spiral
-                final = ("I kept hitting the same error and stopped retrying. Try: "
-                         "'write a simpler version' or split the task into smaller files.")
+                if self.frontier_ready() and not escalated:
+                    self._stuck_task = text          # offer a consented escalation (v0.22)
+                    self.last_options = ["⤴ Escalate this step to Claude", "Keep it local"]
+                    final = ("The local model is stuck on this. I can escalate the task to a "
+                             "frontier model (Claude) — one consented step, every byte logged in "
+                             "/ledger. Or keep it local.")
+                else:
+                    final = ("I kept hitting the same error and stopped retrying. Try: "
+                             "'write a simpler version' or split the task into smaller files.")
                 break
             extra = (" You are repeating a failing action — CHANGE approach: simpler "
                      "content, fewer/escaped quotes, or split into smaller files."

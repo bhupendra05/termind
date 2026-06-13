@@ -547,3 +547,36 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a laptop labeled "LOCAL · private" with a soft shield around it; a single dashed arrow leaves it upward to a small cloud labeled "frontier model", and on that arrow sits a glowing toll-gate with a green "✓ consented" check and a tag reading "832 bytes · logged". Below the laptop, a monospace status line: `data off-machine: 832 bytes across 1 consented cloud escalation — all logged`. To the right, a small audit-ledger card shows an `escalate · cloud:claude · 832 bytes` row with a "✓ verified" badge. Top headline in bold charcoal: **"Private by default. Frontier on consent. Every byte logged."** Subtitle: "termind v0.21 · /reach · one audited path off the machine · verifiable offline · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.22 — Escalate-in-the-loop (local agent flails → one click → frontier builds it, audited)
+
+### 📣 Post
+
+> **The honest problem with a local coding agent: small models get stuck. The dishonest fix is to quietly phone the cloud. termind v0.22 does the honest version — and it's the best demo I've shipped.**
+>
+> Your local model (gemma3) is building a calculator and keeps failing the same step. Instead of giving up — or secretly calling the cloud — termind stops and offers you a button: **"⤴ Escalate this step to Claude."**
+>
+> Click it, and the *same agent loop* re-runs with a frontier model as the brain. It writes the files the local model couldn't. And **every single cloud turn is sealed into the tamper-evident audit ledger** as a consented escalation — there is no unlogged path off your machine, even mid-build.
+>
+> 🧩 This fuses three releases into one interaction:
+> • v0.19 clickable choices → the escalate button
+> • v0.20 audit ledger → every action + every cloud byte, hash-chained
+> • v0.21 consent escalation → one `_frontier()` chokepoint, nothing leaves silently
+>
+> 🧾 Afterwards, `/ledger` shows the whole truth: the 3 local failures, the 2 cloud calls with exact byte counts, and the successful write — all verifiable offline. `/status`: "data off-machine: 4422 bytes across 2 consented cloud escalations, all logged."
+>
+> "Keep it local" declines. No API key? You just get the honest local give-up — nothing reaches out.
+>
+> **Private local agent by default. Frontier muscle on consent. Fully audited.** That's the whole thesis in a single click.
+>
+> Local-first · $0 by default · 140 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #AITrust #ClaudeCode #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Three-step horizontal flow with arrows: (1) a terminal card titled "LOCAL · gemma3" showing two red "✗ write — blocked" rows and a tired emoji; (2) a glowing clay chip button labeled "⤴ Escalate this step to Claude" with a cursor clicking it; (3) a terminal card titled "FRONTIER · on consent" showing "✓ write calc.py" in green and "✓ done". Beneath all three, a single ledger strip runs left-to-right with chain links: `blocked · blocked · escalate 2112B · write · escalate 2310B` ending in a green "✓ verified" seal, and a label "data off-machine: 4422 B — all logged". Top headline in bold charcoal: **"Local by default. Frontier on consent. Every byte logged."** Subtitle: "termind v0.22 · escalate-in-the-loop · audited end to end · local-first · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
