@@ -13,6 +13,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .llm import list_models
 from .repl import Session
+from . import db as dbmod
+from . import scan as scanmod
+from . import lifecycle as lcmod
 
 
 def _strip_ansi(t: str) -> str:
@@ -45,6 +48,9 @@ class _Handler(BaseHTTPRequestHandler):
                 "facts": len(s.store["facts"]), "chunks": s.chunks,
                 "version": __import__("termind").__version__,
                 "agent_mode": s.agent_mode,
+                "db": s.db_context(),                          # selected database (bottom dock)
+                "tier": s.store.get("tier", "smart"),
+                "state": getattr(s, "_state", "idle"),
             }))
         if self.path.startswith("/api/chats"):
             s = self.session
@@ -75,6 +81,22 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({              # compact view for the panel
                 "summary": led.summary(), "integrity": led.verify(),
                 "entries": led.tail(50)}))
+        if self.path == "/api/db":
+            s = self.session
+            return self._send(200, json.dumps({
+                "databases": s.databases(), "active": s.active_db(),
+                "context": s.db_context(), "status": s.db_status(),
+                "engines": dbmod.engines_available()}))
+        if self.path == "/api/scan":
+            s = self.session
+            return self._send(200, json.dumps({
+                "workspace": s.workspace(), "summary": scanmod.summary(s.last_scan),
+                "findings": s.last_scan[:50]}))
+        if self.path == "/api/lifecycle":
+            s = self.session
+            return self._send(200, json.dumps({
+                "plan": s.manifest.cleanup_plan(), "models": lcmod.ollama_models_dir(),
+                "summary": lcmod.isolation_summary(s.manifest)}))
         return self._send(404, "not found", "text/plain")
 
     def do_POST(self):
@@ -181,6 +203,33 @@ class _Handler(BaseHTTPRequestHandler):
             with self.session._lock:
                 out = _strip_ansi(self.session.do_model(name))
             return self._send(200, json.dumps({"reply": out, "model": self.session.model}))
+        if self.path == "/api/db":
+            s, op = self.session, str(req.get("op", ""))
+            with s._lock:
+                if op == "add":
+                    out = s.db_add(str(req.get("name", "")), str(req.get("spec", "")))
+                elif op == "use":
+                    out = s.db_use(str(req.get("name", "")))
+                elif op == "schema":
+                    out = s.db_schema(str(req.get("table", "")))
+                elif op == "confirm":
+                    out = s._confirm_sql(str(req.get("answer", "confirm")))
+                else:                                  # op == "query"
+                    out = s.do_db_query(str(req.get("text", "")))
+            return self._send(200, json.dumps({
+                "reply": _strip_ansi(out), "databases": s.databases(), "active": s.active_db(),
+                "context": s.db_context(), "pending": bool(s._pending_sql)}))
+        if self.path == "/api/scan":
+            s = self.session
+            with s._lock:
+                s.scan_workspace()
+            return self._send(200, json.dumps({
+                "summary": scanmod.summary(s.last_scan), "findings": s.last_scan[:50],
+                "workspace": s.workspace()}))
+        if self.path == "/api/tier":
+            out = self.session.set_tier(str(req.get("tier", "")))
+            return self._send(200, json.dumps({"reply": out,
+                                               "tier": self.session.store.get("tier", "smart")}))
         return self._send(404, json.dumps({"error": "not found"}))
 
 
@@ -511,6 +560,7 @@ animation:confl .9s ease-out forwards;z-index:60}
   <span class=wslab>⌥ CODE</span>
   <button class=mbtn id=wsbrowse>📂 choose folder</button>
   <span id=wscur class=wspathpill>no workspace yet</span>
+  <span id=dbcur class=wspathpill style="display:none"></span>
   <button class=mbtn id=wstree>📁 files</button>
   <span class=modes>
     <button class=mode data-m=plan title="propose only — nothing executes">📋 plan</button>
@@ -554,6 +604,8 @@ animation:confl .9s ease-out forwards;z-index:60}
     <button class=snavi data-s=appearance>🎨 Appearance</button>
     <button class=snavi data-s=memory>🧠 Memory</button>
     <button class=snavi data-s=tools>🧰 Toolchains</button>
+    <button class=snavi data-s=data>🗄 Databases</button>
+    <button class=snavi data-s=security>🛡 Security</button>
     <button class=snavi data-s=audit>🔒 Audit</button>
     <button class=snavi data-s=help>📖 Help</button>
     <button class=snavi data-s=about>▲ About</button>
@@ -593,6 +645,32 @@ animation:confl .9s ease-out forwards;z-index:60}
     <div class=sub>auto-detected languages on THIS machine — the code agent uses these exact commands</div>
     <div id=stools></div>
     <button class=mbtn id=stoolref style="margin-top:8px">↻ re-detect</button>
+  </section>
+  <section class=spane data-s=data>
+    <h2>Databases</h2>
+    <div class=sub>connect a database, then query it in plain language or SQL. termind verifies every query and shows an impact preview before anything destructive runs. SQLite needs zero dependencies; other engines install their driver into the isolated workspace venv.</div>
+    <div id=sdblist style="margin:8px 0"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <input id=sdbname class=sin style="flex:0 0 110px" placeholder="name">
+      <input id=sdbspec class=sin style="flex:1" placeholder="./app.db  or  postgres://user:pass@host/db">
+      <button class=mbtn id=sdbadd style="background:var(--clay);color:#fff;border:0">+ add</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <input id=sdbq class=sin style="flex:1" placeholder="ask in English, or write SQL…">
+      <button class=mbtn id=sdbrun>run</button>
+    </div>
+    <pre id=sdbout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--card);border-radius:8px;padding:10px;margin-top:8px;max-height:240px;overflow:auto"></pre>
+  </section>
+  <section class=spane data-s=security>
+    <h2>Security</h2>
+    <div class=sub>termind sweeps every folder you select for exposed secrets, dangerous scripts, and insecure dependencies — locally, offline. It also keeps the workspace isolated so termind uninstalls clean.</div>
+    <div id=ssecbadge style="margin:10px 0"></div>
+    <div id=ssecrows></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class=mbtn id=ssecscan>↻ rescan folder</button>
+      <button class=mbtn id=ssecclean>🧹 uninstall plan</button>
+    </div>
+    <pre id=ssecclout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);margin-top:8px"></pre>
   </section>
   <section class=spane data-s=audit>
     <h2>Audit ledger</h2>
@@ -709,7 +787,8 @@ async function state(){const s=await (await fetch('/api/state')).json();
 document.querySelectorAll('.mode').forEach(b=>b.classList.toggle('on',b.dataset.m==s.agent_mode));
 document.getElementById('warn').style.display=s.live?'none':'block';
  sel.innerHTML='';s.models.forEach(m=>{const o=document.createElement('option');o.value=m;
- o.textContent=m;if(m.split(':')[0]==s.model.split(':')[0])o.selected=true;sel.appendChild(o)})}
+ o.textContent=m;if(m.split(':')[0]==s.model.split(':')[0])o.selected=true;sel.appendChild(o)});
+ const dc=document.getElementById('dbcur');if(dc){if(s.db){dc.textContent='🗄 '+s.db;dc.style.display='inline-block'}else{dc.style.display='none'}}}
 sel.onchange=async()=>{const b=await (await fetch('/api/model',{method:'POST',
  headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel.value})})).json();
  add('bot',b.reply);state()}
@@ -833,6 +912,8 @@ document.querySelectorAll('.snavi').forEach(b=>b.onclick=()=>{
  document.querySelectorAll('.spane').forEach(p=>p.classList.toggle('on',p.dataset.s==b.dataset.s));
  if(b.dataset.s=='tools')loadTools();
  if(b.dataset.s=='audit')loadAudit();
+ if(b.dataset.s=='data')loadDb();
+ if(b.dataset.s=='security')loadSec();
  if(b.dataset.s=='about')document.getElementById('sabout').textContent='version '+ver.textContent;});
 async function loadTools(refresh){const d=await (refresh
  ?await fetch('/api/toolchain',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
@@ -845,6 +926,39 @@ async function loadTools(refresh){const d=await (refresh
   r.querySelector('.tv').textContent=v.cmd+' '+v.version;
   r.querySelector('.tp').textContent=v.path;el.appendChild(r)})}
 document.getElementById('stoolref').onclick=()=>loadTools(true);
+async function loadDb(){const d=await (await fetch('/api/db')).json();
+ const el=document.getElementById('sdblist');el.innerHTML='';
+ if(!d.databases.length){el.innerHTML='<div class=ds>no databases yet — add one below.</div>'}
+ d.databases.forEach(db=>{const r=document.createElement('div');r.className='trow';
+  const on=db.name==d.active;
+  r.innerHTML='<span class=tl style="color:'+(on?'var(--clay)':'var(--dim)')+'">'+(on?'● ':'') +db.name+'</span><span class=tv>'+db.engine+'</span><span class=tp></span>';
+  r.querySelector('.tp').textContent=db.spec;
+  r.style.cursor='pointer';r.onclick=async()=>{await fetch('/api/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'use',name:db.name})});loadDb();state()};
+  el.appendChild(r)})}
+async function dbApi(op,extra){return (await (await fetch('/api/db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({op:op},extra||{}))})).json())}
+document.getElementById('sdbadd').onclick=async()=>{const r=await dbApi('add',{name:document.getElementById('sdbname').value,spec:document.getElementById('sdbspec').value});
+ document.getElementById('sdbout').textContent=r.reply;loadDb();state()};
+document.getElementById('sdbrun').onclick=async()=>{const t=document.getElementById('sdbq').value;
+ const r=await dbApi('query',{text:t});const out=document.getElementById('sdbout');out.textContent=r.reply;
+ if(r.pending){const c=document.createElement('div');c.className='quick';
+  ['confirm','cancel'].forEach(a=>{const b=document.createElement('button');b.className='qchip';b.textContent=a;
+   b.onclick=async()=>{const rr=await dbApi('confirm',{answer:a});out.textContent=r.reply+'\n\n'+rr.reply;loadDb()};c.appendChild(b)});
+  out.parentNode.insertBefore(c,out.nextSibling)}}
+async function loadSec(){const d=await (await fetch('/api/scan')).json();renderSec(d)}
+function renderSec(d){const s=d.summary,ok=s.clean;
+ document.getElementById('ssecbadge').innerHTML='<span class=abadge style="background:'+(ok?'var(--ok,#1f7a4d)':'#a3262d')+'">'+(ok?'✓ CLEAN':'⚠ '+s.total+' ISSUE(S)')+'</span><span class=ameta>'+s.high+' high · '+s.medium+' medium · '+s.low+' low · '+(d.workspace||'')+'</span>';
+ const box=document.getElementById('ssecrows');box.innerHTML='';
+ (d.findings||[]).forEach(f=>{const r=document.createElement('div');r.className='arow';
+  const col=f.severity=='high'?'#a3262d':f.severity=='medium'?'#b8860b':'var(--dim)';
+  r.innerHTML='<span class=ao style="color:'+col+'">'+f.severity+'</span><span class=at></span><span class=atg></span>';
+  r.querySelector('.at').textContent=f.kind;r.querySelector('.atg').textContent=f.file+':'+f.line+' — fix: '+f.fix;
+  r.title=f.snippet;box.appendChild(r)})}
+document.getElementById('ssecscan').onclick=async()=>{const d=await (await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();renderSec(d)};
+document.getElementById('ssecclean').onclick=async()=>{const d=await (await fetch('/api/lifecycle')).json();
+ const p=d.plan;let t=d.summary+'\\n\\nfull uninstall would remove:\\n';
+ p.assets.forEach(a=>{t+='  '+(a.exists?'✓':'·')+' '+a.kind+'  '+a.path+'\\n'});
+ t+='  · termind home: '+p.home+'\\n'+d.models.note;
+ document.getElementById('ssecclout').textContent=t};
 async function loadAudit(){const d=await (await fetch('/api/ledger')).json();
  const s=d.summary,ok=d.integrity.ok;
  const badge=document.getElementById('sauditbadge');

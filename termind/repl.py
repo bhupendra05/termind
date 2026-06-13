@@ -35,6 +35,9 @@ CATALOG = [
 ]
 from .helpdocs import DOC as HELP_DOC, best_topic
 from . import toolchain as tcmod
+from . import db as dbmod
+from . import scan as scanmod
+from . import lifecycle as lcmod
 from .ledger import Ledger
 from .store import load as store_load, save as store_save
 
@@ -145,6 +148,9 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} embedding search over all memories
 {CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
 {CY}║{N}  {GR}◉{N} {WH}/ledger{N}          {D}»{N} tamper-evident log of every agent action · export
+{CY}║{N}  {GR}◉{N} {WH}/db <nl|sql>{N}     {D}»{N} query your DB · verifies + previews before destructive ops
+{CY}║{N}  {GR}◉{N} {WH}/scan{N}            {D}»{N} sweep the folder for secrets · risky scripts · bad deps
+{CY}║{N}  {GR}◉{N} {WH}/termind{N}         {D}»{N} isolated workspace · uninstall plan   {GR}◉{N} {WH}/tier{N} {D}» smart/smarter/max{N}
 {CY}║{N}  {GR}◉{N} {WH}/help{N}  {D}» this panel{N}      {GR}◉{N} {WH}/exit{N}  {D}» jack out{N}
 {CY}╚════════════════════════════════════════════════════════════════╝{N}
    {PK}▸{N} {D}PRIVATE{N} {PK}▸{N} {D}$0/QUERY{N} {PK}▸{N} {D}SANDBOXED + BUDGETED BY THE AION KERNEL{N}
@@ -282,6 +288,11 @@ class Session:
             store_save(self.store)
         self.toolchain = tc
         self.ledger = Ledger()       # tamper-evident audit log of every code-agent action
+        self.manifest = lcmod.Manifest()   # every termind-managed asset → clean uninstall
+        self._db = None              # the open Database connection for the selected DB
+        self._pending_sql = None     # (db_name, sql) awaiting a destructive-op confirmation
+        self.last_scan = []          # findings from the last folder security sweep
+        self._state = "idle"         # current activity: idle/Reading/Analyzing/Editing/Writing
 
     # ── chat sessions: new chat, continue previous, switch ───────────────────
     def _new_chat_id(self) -> str:
@@ -674,6 +685,9 @@ class Session:
         return None
 
     def route(self, text: str) -> str:
+        pend = self._db_followup(text)               # a pending destructive query awaits confirm
+        if pend is not None:
+            return pend
         follow = self._image_followups(text)
         if follow is not None:
             return follow
@@ -1160,6 +1174,8 @@ class Session:
                     continue
                 final = str(act.get("say") or "done.")
                 break
+            self._set_state({"mkdir": "Editing", "write": "Writing", "read": "Reading",
+                             "run": "Analyzing"}.get(tool, "Analyzing"))
             if tool == "mkdir":
                 res = self.do_mkdir(str(act.get("path", "")))
             elif tool == "write":
@@ -1413,7 +1429,13 @@ class Session:
         self.store["workspace"] = full          # global fallback for new sessions
         store_save(self.store)
         os.chdir(full)              # builds/writes/actions now happen here
-        return f"workspace set: {full} — builds, files and commands run here now"
+        self.scan_workspace()       # v2.0: proactive security sweep on selection
+        msg = f"workspace set: {full} — builds, files and commands run here now"
+        s = scanmod.summary(self.last_scan)
+        if not s["clean"]:
+            msg += (f"\n⚠ security: {s['total']} issue(s) found here "
+                    f"({s['high']} high · {s['medium']} medium · {s['low']} low) — run /scan")
+        return msg
 
     def workspace(self) -> str:
         c = self.store["chats"].get(self.store.get("active_chat") or "")
@@ -1709,6 +1731,286 @@ class Session:
         return head + ("\n" + "\n".join(rows) if rows else "\n  (no actions recorded yet)") \
             + "\nexport for a security review: /ledger export"
 
+    # ── v2.0: database operations ────────────────────────────────────────────
+    _SQL_LEAD = re.compile(r"^\s*(select|insert|update|delete|with|create|drop|alter|"
+                           r"truncate|replace|pragma|explain)\b", re.I)
+
+    def databases(self) -> list:
+        return self.store.get("databases", [])
+
+    def active_db(self):
+        return self.store.get("active_db")
+
+    def db_context(self) -> str:
+        """The selected DB, for the bottom-dock context bar (alongside the folder)."""
+        name = self.active_db()
+        if not name:
+            return ""
+        rec = next((d for d in self.databases() if d["name"] == name), {})
+        return f"{name} ({rec.get('engine', '?')})"
+
+    def _database(self):
+        name = self.active_db()
+        if not name:
+            return None
+        if self._db is not None and self._db.name == name:
+            return self._db
+        rec = next((d for d in self.databases() if d["name"] == name), None)
+        if not rec:
+            return None
+        self._db = dbmod.Database(rec["name"], rec["spec"])
+        return self._db
+
+    def _driver_hint(self, engine: str) -> str:
+        mod = dbmod.DRIVERS.get(engine, "?")
+        venv = os.path.join(self.workspace(), ".venv", "bin", "pip")
+        return (f"{engine} needs the '{mod}' driver. termind keeps it ISOLATED in the workspace "
+                f"venv — install with:  {venv} install {mod}")
+
+    def db_add(self, name: str, spec: str) -> str:
+        name, spec = name.strip(), spec.strip()
+        if not name or not spec:
+            return ("usage: /db add <name> <dsn>   e.g.  /db add app ./app.db   or "
+                    "postgres://user:pass@host/db")
+        engine, target = dbmod.parse_dsn(spec)
+        self.store["databases"] = [d for d in self.databases() if d["name"] != name] + \
+            [{"name": name, "spec": spec, "engine": engine}]
+        self.store["active_db"] = name
+        self._db = None
+        store_save(self.store)
+        if engine == "sqlite" and target not in (":memory:", ""):
+            self.manifest.record("db", target, f"{name} (sqlite)")
+        note = ""
+        if engine != "sqlite" and not dbmod.engines_available().get(engine):
+            note = "\n" + self._driver_hint(engine)
+        return f"added '{name}' ({engine}) and selected it.{note}"
+
+    def db_use(self, name: str) -> str:
+        name = name.strip()
+        if not any(d["name"] == name for d in self.databases()):
+            return f"no database '{name}'. add one: /db add <name> <dsn>"
+        self.store["active_db"] = name
+        self._db = None
+        store_save(self.store)
+        return self.db_status()
+
+    def db_status(self) -> str:
+        name = self.active_db()
+        if not name:
+            return ("no database selected. add one in Settings → Databases, or "
+                    "/db add <name> <dsn>")
+        rec = next((d for d in self.databases() if d["name"] == name), {})
+        eng = rec.get("engine", "?")
+        try:
+            tabs = self._database().tables()
+            return (f"selected: {name} ({eng}) · {len(tabs)} table(s): "
+                    f"{', '.join(tabs[:12]) or '(none)'}")
+        except dbmod.DriverMissing:
+            return f"selected: {name} ({eng}) — {self._driver_hint(eng)}"
+        except Exception as e:
+            return f"selected: {name} ({eng}) — couldn't connect: {e}"
+
+    def db_schema(self, table: str = "") -> str:
+        d = self._database()
+        if not d:
+            return "no database selected."
+        try:
+            sch = d.schema(table.strip() or None)
+        except dbmod.DriverMissing:
+            return self._driver_hint(d.engine)
+        except Exception as e:
+            return f"couldn't read schema: {e}"
+        if not sch:
+            return "(no tables)"
+        return "\n".join(f"{t}({', '.join(c + ' ' + ty for c, ty in cols)})"
+                         for t, cols in sch.items())
+
+    def do_db(self, line: str) -> str:
+        arg = line[3:].strip() if line.startswith("/db") else line.strip()
+        if not arg or arg == "status":
+            return self.db_status()
+        if arg == "list":
+            dbs = self.databases()
+            if not dbs:
+                return "no databases. add one: /db add <name> <dsn>"
+            cur = self.active_db()
+            return "\n".join(("● " if d["name"] == cur else "  ")
+                             + f"{d['name']:<14} {d['engine']:<9} {d['spec']}" for d in dbs)
+        if arg.startswith("add"):
+            p = arg.split(None, 2)
+            return self.db_add(p[1] if len(p) > 1 else "", p[2] if len(p) > 2 else "")
+        if arg.startswith("use"):
+            return self.db_use(arg[3:].strip())
+        if arg.startswith("schema"):
+            return self.db_schema(arg[6:].strip())
+        if arg.startswith(("confirm", "cancel")):
+            return self._confirm_sql(arg)
+        if arg.startswith("query"):
+            return self.do_db_query(arg[5:].strip())
+        return self.do_db_query(arg)              # bare "/db <text>" → a query
+
+    def do_db_query(self, text: str) -> str:
+        d = self._database()
+        if not d:
+            return ("no database selected — add one in Settings → Databases, or "
+                    "/db add <name> <dsn>")
+        if not text.strip():
+            return "usage: /db query <natural language or SQL>"
+        if self._SQL_LEAD.match(text):
+            sql = text.strip().rstrip(";")
+        else:
+            sql = self._nl_to_sql(d, text)
+            if sql.startswith("✗"):
+                return sql
+        return self._run_sql(d, sql, consent=text)
+
+    def _nl_to_sql(self, d, nl: str) -> str:
+        if not self.live:
+            return ("✗ natural-language → SQL needs a live local model — write the SQL "
+                    "directly, or start Ollama.")
+        try:
+            sch = d.schema()
+        except Exception:
+            sch = {}
+        schema_txt = "\n".join(f"{t}({', '.join(c for c, _ in cols)})"
+                               for t, cols in sch.items()) or "(unknown schema)"
+        self._set_state("Analyzing")
+        raw = self._chat([
+            {"role": "system", "content":
+             "Translate the request into ONE valid SQL statement for this schema. Reply with "
+             "SQL ONLY — no prose, no markdown fences.\nSchema:\n" + schema_txt},
+            {"role": "user", "content": nl}])
+        sql = self._strip_fences(raw).strip().rstrip(";")
+        if not self._SQL_LEAD.match(sql):
+            return f"✗ couldn't turn that into SQL. Model said: {raw[:160]}"
+        return sql
+
+    def _run_sql(self, d, sql: str, consent: str = "") -> str:
+        cid = self.store.get("active_chat") or "default"
+        v = d.verify(sql)
+        if not v.get("ok"):
+            return f"✗ invalid SQL: {v.get('error')}\n  {sql}"
+        if dbmod.is_destructive(sql):
+            try:
+                pv = d.preview(sql)
+            except dbmod.DriverMissing:
+                return self._driver_hint(d.engine)
+            self._pending_sql = (d.name, sql)
+            aff = pv.get("affected")
+            impact = (f"{aff} row(s) affected" if isinstance(aff, int) and aff >= 0
+                      else "schema change (DDL)" if aff == -1 else "impact: review carefully")
+            plan = ("\n  plan: " + " → ".join(pv.get("plan", [])[:3])) if pv.get("plan") else ""
+            self.ledger.record(session=cid, tool="db-preview",
+                               target=f"{d.name}: {sql[:80]}", outcome="ok",
+                               consent=consent, detail=impact)
+            return (f"⚠ DESTRUCTIVE on '{d.name}':\n  {sql}\n  preview: {impact}{plan}\n"
+                    "  reply 'confirm' to run it, or 'cancel'. (Nothing has changed.)")
+        self._set_state("Reading")
+        try:
+            res = d.run(sql)
+        except dbmod.DriverMissing:
+            return self._driver_hint(d.engine)
+        except Exception as e:
+            return f"✗ query failed: {e}\n  {sql}"
+        self.ledger.record(session=cid, tool="db-read", target=f"{d.name}: {sql[:80]}",
+                           outcome="ok", consent=consent)
+        return f"$ {sql}\n" + self._fmt_rows(res)
+
+    def _confirm_sql(self, text: str) -> str:
+        if not self._pending_sql:
+            return "nothing pending."
+        name, sql = self._pending_sql
+        if re.search(r"\b(cancel|no|abort)\b", text, re.I):
+            self._pending_sql = None
+            return f"cancelled — '{name}' is unchanged."
+        d = self._database()
+        if not d or d.name != name:
+            self._pending_sql = None
+            return "the pending query's database is no longer selected — cancelled."
+        try:
+            r = d.execute(sql)
+        except Exception as e:
+            self._pending_sql = None
+            return f"✗ execution failed: {e}"
+        self._pending_sql = None
+        self.ledger.record(session=self.store.get("active_chat") or "default",
+                           tool="db-write", target=f"{name}: {sql[:80]}", outcome="ok",
+                           detail=f"{r['affected']} rows")
+        return f"✓ executed on '{name}': {r['affected']} row(s) changed · logged in /ledger"
+
+    @staticmethod
+    def _fmt_rows(res: dict) -> str:
+        cols, rows = res.get("columns", []), res.get("rows", [])
+        if not cols:
+            return "(no columns)"
+        if not rows:
+            return " | ".join(cols) + "\n(no rows)"
+        w = [max(len(str(cols[i])), *(len(str(r[i])) for r in rows)) for i in range(len(cols))]
+        line = lambda vals: " | ".join(str(v).ljust(w[i]) for i, v in enumerate(vals))
+        out = [line(cols), "-+-".join("-" * x for x in w)] + [line(r) for r in rows]
+        if res.get("truncated"):
+            out.append(f"… (showing first {len(rows)})")
+        return "\n".join(out)
+
+    def _db_followup(self, text: str):
+        """A bare 'confirm'/'cancel' resolves a pending destructive query."""
+        if self._pending_sql and re.match(r"\s*(confirm|yes|run it|run|cancel|no|abort)\b",
+                                           text, re.I):
+            return self._confirm_sql(text)
+        return None
+
+    # ── v2.0: proactive security scanning ────────────────────────────────────
+    def scan_workspace(self) -> list:
+        try:
+            self.last_scan = scanmod.scan_folder(self.workspace())
+        except Exception:
+            self.last_scan = []
+        return self.last_scan
+
+    def _scan_report(self) -> str:
+        s = scanmod.summary(self.last_scan)
+        if s["clean"]:
+            return f"✓ security scan clean — no exposed secrets, dangerous scripts, or insecure deps."
+        head = (f"⚠ security scan: {s['total']} issue(s) — {s['high']} high · "
+                f"{s['medium']} medium · {s['low']} low")
+        rows = [f"  [{f['severity']}] {f['kind']} — {f['file']}:{f['line']} ({f['snippet']})\n"
+                f"     fix: {f['fix']}" for f in self.last_scan[:8]]
+        more = f"\n  …and {s['total'] - 8} more" if s["total"] > 8 else ""
+        return head + "\n" + "\n".join(rows) + more
+
+    def do_scan(self) -> str:
+        self.scan_workspace()
+        return self._scan_report()
+
+    # ── v2.0: workspace lifecycle / clean uninstall ──────────────────────────
+    def do_termind(self, line: str) -> str:
+        arg = line.replace("/termind", "", 1).strip()
+        if arg.startswith(("cleanup", "uninstall", "purge")):
+            plan = self.manifest.cleanup_plan()
+            rows = [f"  {'✓' if a['exists'] else '·'} {a['kind']:<9} {a['bytes']:>10} B  {a['path']}"
+                    for a in plan["assets"]]
+            mb = plan["total_bytes"] / 1e6
+            return (f"termind uninstall plan — everything lives under {plan['home']}\n"
+                    + (("\n".join(rows) + "\n") if rows else "")
+                    + f"  · termind home (memory/ledger/manifest): {plan['home_bytes']} B\n"
+                    f"total reclaimable: {mb:.1f} MB across {plan['count']} tracked asset(s) + "
+                    "home.\nRemove the termind home and the assets above for a complete, clean "
+                    "uninstall. (termind won't delete them for you — that's your call.)")
+        return lcmod.isolation_summary(self.manifest)
+
+    # ── v2.0: model tiers + activity state ───────────────────────────────────
+    def set_tier(self, t: str) -> str:
+        t = t.strip().lower()
+        if t not in ("smart", "smarter", "max"):
+            return ("tiers — smart (local) · smarter (deeper local) · max (frontier on consent). "
+                    f"current: {self.store.get('tier', 'smart')}")
+        self.store["tier"] = t
+        store_save(self.store)
+        return f"model tier → {t}."
+
+    def _set_state(self, s: str):
+        self._state = s
+
     def handle(self, line: str) -> str:
         line = line.strip()
         if not line:
@@ -1786,6 +2088,14 @@ class Session:
                     + "\nrefresh: /tools refresh") if rows else "none detected — /tools refresh"
         if line.startswith("/ledger"):
             return self._ledger_report(line)
+        if line.startswith("/db"):
+            return self.do_db(line)
+        if line.startswith("/scan"):
+            return self.do_scan()
+        if line.startswith("/termind"):
+            return self.do_termind(line)
+        if line.startswith("/tier"):
+            return self.set_tier(line[5:].strip())
         if line == "/mode" or line.startswith("/mode "):
             return self.set_mode(line[5:].strip() or "")
         if line.startswith("/ws"):
@@ -1853,6 +2163,9 @@ class Session:
                     self.last_image = (image_name, image)
                     return self.do_edit(line)
                 return self.do_vision(line, image, image_name)
+            pend = self._db_followup(line)           # confirm/cancel a pending destructive query
+            if pend is not None:
+                return pend
             follow = self._image_followups(line)
             if follow is not None:
                 return follow

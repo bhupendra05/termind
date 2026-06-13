@@ -580,3 +580,33 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Three-step horizontal flow with arrows: (1) a terminal card titled "LOCAL · gemma3" showing two red "✗ write — blocked" rows and a tired emoji; (2) a glowing clay chip button labeled "⤴ Escalate this step to Claude" with a cursor clicking it; (3) a terminal card titled "FRONTIER · on consent" showing "✓ write calc.py" in green and "✓ done". Beneath all three, a single ledger strip runs left-to-right with chain links: `blocked · blocked · escalate 2112B · write · escalate 2310B` ending in a green "✓ verified" seal, and a label "data off-machine: 4422 B — all logged". Top headline in bold charcoal: **"Local by default. Frontier on consent. Every byte logged."** Subtitle: "termind v0.22 · escalate-in-the-loop · audited end to end · local-first · $0." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v2.0 — The unified local agent: databases + proactive security + a disposable, audited workspace
+
+### 📣 Post
+
+> **termind v2.0 is here — and it's the version where a private terminal agent grows up into something a security-conscious team can actually trust with a database.**
+>
+> Three new pillars, zero compromise on the local-first, audited ethos:
+>
+> 🗄 **Talk to your database — safely.** Connect a DB in Settings, see it in the bottom-dock beside your folder, and query it in plain English or raw SQL. termind verifies every query, and before anything destructive (DELETE / UPDATE / DROP / migration) it shows you the EXPLAIN plan and the EXACT number of rows it would affect — computed in a savepoint that's rolled back, so nothing changes — and refuses to run until you confirm. SQLite needs **zero dependencies**; Postgres/MySQL/MongoDB drivers install into termind's **isolated workspace venv**, never your system Python. Every read, preview, and write is sealed into the tamper-evident audit ledger.
+>
+> 🛡 **Proactive security scanning.** The instant you select a folder, termind sweeps it — offline, locally — for exposed secrets (AWS/GitHub/Slack/Stripe keys, private keys, hardcoded creds), dangerous scripts (`curl | sh`, `rm -rf /`, decode-and-exec droppers), and insecure dependencies. You get the file, the line, a **redacted** snippet, and a concrete fix. Secrets never echo in full.
+>
+> 🧹 **Disposable by design.** Everything termind installs is tracked in a manifest, so `/termind cleanup` prints a complete uninstall plan with sizes. And it's honest about the one thing it can't fully contain — Ollama's shared model store — telling you how to isolate it instead of pretending.
+>
+> Plus: destructive DB ops default to **Ask → confirm**, activity-state indicators, and model tiers (smart / smarter / max → local → deeper-local → frontier-on-consent).
+>
+> Private by default. Provable when it isn't. Now with hands on your data — and a leash on every one of them.
+>
+> Local-first · $0 by default · 152 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #AITrust #DatabaseAI #DevSecOps #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. A central termind window with a bottom-dock context bar showing two pills: "📂 ~/app" and "🗄 app (sqlite)". Three labeled panels fan out: (1) a DB query card — "delete inactive users" → a yellow ⚠ preview "DELETE … — 1,284 rows affected · plan: SEARCH users" with [confirm] [cancel] buttons; (2) a security card — red "⚠ 2 issues" with rows "AWS key — config.py:1 (AKIA…MPLE)" and "curl | sh — setup.sh:3", each with a small "fix" tag; (3) a workspace card — "/termind cleanup" listing ".venv ✓, app.db ✓, models → isolate" with a green "clean uninstall" seal. A thin audit-ledger strip runs along the bottom: "db-read · db-preview · db-write · ✓ verified". Top headline in bold charcoal: **"Your data. Your machine. Every action on the record."** Subtitle: "termind v2.0 · databases + proactive security + disposable workspace · preview before destructive · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

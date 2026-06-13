@@ -10,7 +10,8 @@ import json
 import os
 
 EMPTY = {"facts": [], "docs": {}, "history": [], "vecs": {}, "model": None,
-         "chats": {}, "active_chat": None, "profile": {}, "workspace": None, "agent_mode": "act", "toolchain": {}}
+         "chats": {}, "active_chat": None, "profile": {}, "workspace": None, "agent_mode": "act", "toolchain": {},
+         "databases": [], "active_db": None, "tier": "smart"}
 
 
 def store_path() -> str:
@@ -31,10 +32,15 @@ def load() -> dict:
                 "profile": dict(data.get("profile", {})),
                 "workspace": data.get("workspace"),
                 "agent_mode": data.get("agent_mode", "act"),
-                "toolchain": dict(data.get("toolchain", {}))}
+                "toolchain": dict(data.get("toolchain", {})),
+                "databases": list(data.get("databases", [])),
+                "active_db": data.get("active_db"),
+                "tier": data.get("tier", "smart")}
     except Exception:
         return {"facts": [], "docs": {}, "history": [], "vecs": {}, "model": None,
-                "chats": {}, "active_chat": None, "profile": {}, "workspace": None, "agent_mode": "act", "toolchain": {}}
+                "chats": {}, "active_chat": None, "profile": {}, "workspace": None,
+                "agent_mode": "act", "toolchain": {}, "databases": [], "active_db": None,
+                "tier": "smart"}
 
 
 def save(data: dict) -> None:
