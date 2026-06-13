@@ -489,3 +489,32 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. LEFT: the termind chat — a bot bubble asks "Which language do you want?" with three crisp clickable chips below it ("Python" highlighted in clay, "JavaScript / Node", "HTML/CSS/JS (web)"), a cursor hovering the lit one. RIGHT: a terminal/run panel showing "$ .venv/bin/pip install -r requirements.txt" then "Successfully installed flask ✓" in green, with a small faded "externally-managed-environment ✗" crossed out behind it. A tiny folder glyph ".venv/" sits between them with a green check. Top headline in bold charcoal: **"Click to answer. pip that just works."** Subtitle: "termind v0.19 · clickable choices · auto-venv installs (PEP-668 fixed) · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.20 — The Agent Action Ledger (tamper-evident audit log)
+
+### 📣 Post
+
+> **The fastest way to kill a local AI coding agent: a competitor whispers "it's an unaudited sandbox — would you let it touch your codebase?" So I built the answer into termind v0.20.**
+>
+> Every action the agent takes now lands in a **tamper-evident audit ledger**: which file, which command, the outcome, the *exact message you typed that authorized it*, and the bytes it wrote.
+>
+> 🔗 **Hash-chained** — each entry stores sha-256(previous + this). Edit any past line and every hash after it breaks. A reviewer can verify the whole chain *from the exported file alone — no key, no trust in me.*
+> ✍️ **Install-signed** — an HMAC key (`~/.termind/ledger.key`, chmod 600) proves an entry came from this machine, not pasted in.
+> 🧱 **Append-only** — one JSONL file, never rewritten.
+> 🔒 **One-click export** — `/ledger export` or the new 🔒 Audit settings panel hands a security team a self-describing artifact they can verify offline.
+>
+> I tested the attack directly: build a project, then edit a past entry to hide a blocked write to `/etc/passwd`. termind catches it at the exact tampered index. ✅
+>
+> This is the thing Cursor/Copilot don't give you for local, and it's exactly what an airgapped/regulated team needs before any agent gets near their code. **Private isn't enough anymore. Private + provable is the moat.**
+>
+> Local · private · $0 · 131 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #AITrust #Compliance #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a vertical chain of 4 audit-log "blocks", each a rounded monospace card showing `tool: write · target: calculator/app.py · outcome: ok` with a small `#hash → prev` link drawn between them like chain links. The 4th block is red, labeled `outcome: blocked · ../../etc/passwd`. To the right, a tampered block glows red with a broken chain-link icon and a bold "⚠ TAMPERED @ #3" badge; on the left a green "✓ VERIFIED — chain intact" badge. A small lock + "export" download glyph sits at the bottom. Top headline in bold charcoal: **"Private isn't enough. Make it provable."** Subtitle: "termind v0.20 · tamper-evident agent action ledger · hash-chained + signed · verify offline · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

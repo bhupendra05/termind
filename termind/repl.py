@@ -35,6 +35,7 @@ CATALOG = [
 ]
 from .helpdocs import DOC as HELP_DOC, best_topic
 from . import toolchain as tcmod
+from .ledger import Ledger
 from .store import load as store_load, save as store_save
 
 # "edit/fix/update <file.ext>: <instruction>" → the file-editing engine (code mode).
@@ -142,6 +143,7 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/remember <fact>{N} {D}»{N} teach it about you · survives restarts
 {CY}║{N}  {GR}◉{N} {WH}/recall <query>{N}  {D}»{N} embedding search over all memories
 {CY}║{N}  {GR}◉{N} {WH}/status{N}          {D}»{N} core · credits burned · sandbox audit
+{CY}║{N}  {GR}◉{N} {WH}/ledger{N}          {D}»{N} tamper-evident log of every agent action · export
 {CY}║{N}  {GR}◉{N} {WH}/help{N}  {D}» this panel{N}      {GR}◉{N} {WH}/exit{N}  {D}» jack out{N}
 {CY}╚════════════════════════════════════════════════════════════════╝{N}
    {PK}▸{N} {D}PRIVATE{N} {PK}▸{N} {D}$0/QUERY{N} {PK}▸{N} {D}SANDBOXED + BUDGETED BY THE AION KERNEL{N}
@@ -277,6 +279,7 @@ class Session:
             self.store["toolchain"] = tc
             store_save(self.store)
         self.toolchain = tc
+        self.ledger = Ledger()       # tamper-evident audit log of every code-agent action
 
     # ── chat sessions: new chat, continue previous, switch ───────────────────
     def _new_chat_id(self) -> str:
@@ -1106,6 +1109,13 @@ class Session:
             short = res.split("\n")[0][:110]
             failed = short.startswith(("⛔", "✗", "(", "can'", "couldn", "unknown",
                                        "command timed", "REJECTED"))
+            if tool in ("mkdir", "write", "read", "run"):   # seal the action into the audit ledger
+                outcome = ("blocked" if short.startswith(("⛔", "REJECTED"))
+                           else "fail" if failed else "ok")
+                nbytes = len(str(act.get("content", ""))) if tool == "write" and not failed else 0
+                self.ledger.record(session=self.store.get("active_chat") or "default",
+                                   tool=tool, target=str(act.get("path") or act.get("cmd") or ""),
+                                   outcome=outcome, consent=text, bytes_written=nbytes, detail=short)
             log.append(("✗ " if failed else "✓ ") + f"{tool} → {short}")
             if failed and short == last_fail:
                 repeats += 1
@@ -1587,10 +1597,40 @@ class Session:
             brain = f"server up, model missing (run: /pull {self.model})"
         else:
             brain = "offline brain (run ./setup.sh)"
+        led = self.ledger.summary()
         return (f"brain: {brain} · facts remembered: {len(self.store['facts'])} · "
                 f"indexed chunks: {self.chunks} · chat turns kept: {len(self.history)} · "
                 f"actions run: {getattr(self, 'actions', 0)} · credits spent: {self.spent:.2f} · "
-                f"denied by sandbox: {self.denied} · data off-machine: 0 bytes")
+                f"denied by sandbox: {self.denied} · audit ledger: {led['count']} actions "
+                f"({led['integrity']}) · data off-machine: 0 bytes")
+
+    def _ledger_report(self, line: str) -> str:
+        """`/ledger` (recent + integrity) · `/ledger verify` · `/ledger export [path]`."""
+        arg = line[len("/ledger"):].strip()
+        led = self.ledger
+        if arg.startswith("export"):
+            dest = arg[len("export"):].strip() or os.path.join(
+                os.environ.get("TERMIND_HOME", os.path.expanduser("~/.termind")),
+                "ledger-export.json")
+            try:
+                with open(dest, "w") as f:
+                    json.dump(led.export(), f, indent=2)
+            except OSError as e:
+                return f"couldn't write export: {e}"
+            return f"exported {led.summary()['count']} actions → {dest}"
+        if arg.startswith("verify"):
+            v = led.verify()
+            return (f"audit ledger VERIFIED — chain intact, {v['count']} actions, no tampering"
+                    if v["ok"] else
+                    f"⚠ audit ledger TAMPERED at entry #{v['broken_at']} of {v['count']}")
+        s = led.summary()
+        rows = [f"  {e['iso']}  {e['outcome']:<7} {e['tool']:<6} {e['target'][:46]}"
+                for e in led.tail(12)]
+        head = (f"audit ledger · {s['count']} actions "
+                f"({s['ok']} ok · {s['fail']} fail · {s['blocked']} blocked) · "
+                f"{s['bytes']} bytes written · integrity: {s['integrity']}")
+        return head + ("\n" + "\n".join(rows) if rows else "\n  (no actions recorded yet)") \
+            + "\nexport for a security review: /ledger export"
 
     def handle(self, line: str) -> str:
         line = line.strip()
@@ -1665,6 +1705,8 @@ class Session:
                     for k, v in self.toolchain.items() if not k.startswith("_")]
             return ("detected toolchains (auto):\n" + "\n".join(rows)
                     + "\nrefresh: /tools refresh") if rows else "none detected — /tools refresh"
+        if line.startswith("/ledger"):
+            return self._ledger_report(line)
         if line == "/mode" or line.startswith("/mode "):
             return self.set_mode(line[5:].strip() or "")
         if line.startswith("/ws"):

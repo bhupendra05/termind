@@ -68,6 +68,13 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/api/help":
             from .helpdocs import TOPICS
             return self._send(200, json.dumps({"topics": TOPICS}))
+        if self.path == "/api/ledger" or self.path.startswith("/api/ledger?"):
+            led = self.session.ledger
+            if self.path.endswith("full=1"):                 # full artifact for download
+                return self._send(200, json.dumps(led.export()))
+            return self._send(200, json.dumps({              # compact view for the panel
+                "summary": led.summary(), "integrity": led.verify(),
+                "entries": led.tail(50)}))
         return self._send(404, "not found", "text/plain")
 
     def do_POST(self):
@@ -381,6 +388,16 @@ font-family:'JetBrains Mono',monospace;align-items:center}
 .trow .tl{width:70px;font-weight:700;color:var(--clay)}
 .trow .tv{color:var(--green);width:80px}
 .trow .tp{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* audit ledger */
+.abadge{display:inline-block;padding:4px 11px;border-radius:8px;color:#fff;font-weight:700;
+font-size:12px;letter-spacing:.2px}
+.ameta{display:block;margin-top:7px;color:var(--dim);font-size:12px}
+.arow{display:flex;gap:10px;padding:6px 8px;border-radius:7px;align-items:center;
+font-family:'JetBrains Mono',monospace;font-size:12px;border-bottom:1px solid var(--line)}
+.arow:hover{background:var(--card)}
+.arow .ao{width:62px;font-weight:700;text-transform:uppercase;font-size:10.5px}
+.arow .at{width:52px;color:var(--clay)}
+.arow .atg{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .obpanel{width:480px;padding:34px 36px 28px}
 .obmark{width:58px;height:58px;margin:0 auto 16px;border-radius:17px;display:grid;
 place-items:center;font-size:26px;color:#fff;
@@ -537,6 +554,7 @@ animation:confl .9s ease-out forwards;z-index:60}
     <button class=snavi data-s=appearance>🎨 Appearance</button>
     <button class=snavi data-s=memory>🧠 Memory</button>
     <button class=snavi data-s=tools>🧰 Toolchains</button>
+    <button class=snavi data-s=audit>🔒 Audit</button>
     <button class=snavi data-s=help>📖 Help</button>
     <button class=snavi data-s=about>▲ About</button>
   </div>
@@ -575,6 +593,16 @@ animation:confl .9s ease-out forwards;z-index:60}
     <div class=sub>auto-detected languages on THIS machine — the code agent uses these exact commands</div>
     <div id=stools></div>
     <button class=mbtn id=stoolref style="margin-top:8px">↻ re-detect</button>
+  </section>
+  <section class=spane data-s=audit>
+    <h2>Audit ledger</h2>
+    <div class=sub>a tamper-evident, append-only record of every action the code agent took on this machine — who authorized it, what it touched, whether it was blocked. Hand the export to a security reviewer.</div>
+    <div id=sauditbadge style="margin:10px 0"></div>
+    <div id=sauditrows style="max-height:260px;overflow:auto"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class=mbtn id=sauditverify>✓ verify integrity</button>
+      <button class=mbtn id=sauditexp style="background:var(--clay);color:#fff;border:0">⬇ export signed ledger</button>
+    </div>
   </section>
   <section class=spane data-s=help>
     <h2>Help & workflows</h2>
@@ -804,6 +832,7 @@ document.querySelectorAll('.snavi').forEach(b=>b.onclick=()=>{
  document.querySelectorAll('.snavi').forEach(x=>x.classList.toggle('on',x===b));
  document.querySelectorAll('.spane').forEach(p=>p.classList.toggle('on',p.dataset.s==b.dataset.s));
  if(b.dataset.s=='tools')loadTools();
+ if(b.dataset.s=='audit')loadAudit();
  if(b.dataset.s=='about')document.getElementById('sabout').textContent='version '+ver.textContent;});
 async function loadTools(refresh){const d=await (refresh
  ?await fetch('/api/toolchain',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
@@ -816,6 +845,29 @@ async function loadTools(refresh){const d=await (refresh
   r.querySelector('.tv').textContent=v.cmd+' '+v.version;
   r.querySelector('.tp').textContent=v.path;el.appendChild(r)})}
 document.getElementById('stoolref').onclick=()=>loadTools(true);
+async function loadAudit(){const d=await (await fetch('/api/ledger')).json();
+ const s=d.summary,ok=d.integrity.ok;
+ const badge=document.getElementById('sauditbadge');
+ badge.innerHTML='<span class=abadge style="background:'+(ok?'var(--ok,#1f7a4d)':'#a3262d')+'">'
+  +(ok?'✓ VERIFIED · chain intact':'⚠ TAMPERED @ #'+d.integrity.broken_at)+'</span>'
+  +'<span class=ameta>'+s.count+' actions · '+s.ok+' ok · '+s.fail+' fail · '+s.blocked+' blocked · '+s.bytes+' bytes written</span>';
+ const box=document.getElementById('sauditrows');box.innerHTML='';
+ if(!d.entries.length){box.innerHTML='<div class=ds style="padding:8px 2px">no actions recorded yet — build something in Code mode.</div>';return}
+ d.entries.slice().reverse().forEach(e=>{const r=document.createElement('div');r.className='arow';
+  const col=e.outcome=='ok'?'var(--ok,#1f7a4d)':e.outcome=='blocked'?'#a3262d':'#b8860b';
+  r.innerHTML='<span class=ao style="color:'+col+'">'+e.outcome+'</span>'
+   +'<span class=at></span><span class=atg></span>';
+  r.querySelector('.at').textContent=e.tool;
+  r.querySelector('.atg').textContent=e.target;
+  r.title=e.iso+(e.consent?'  ·  authorized by: "'+e.consent+'"':'');box.appendChild(r)})}
+document.getElementById('sauditverify').onclick=async()=>{await loadAudit();
+ const v=(await (await fetch('/api/ledger')).json()).integrity;
+ add('bot',v.ok?'🔒 audit ledger verified — hash chain intact across '+v.count+' actions, no tampering.':'⚠ audit ledger TAMPERED at entry #'+v.broken_at+'.')};
+document.getElementById('sauditexp').onclick=async()=>{
+ const full=await (await fetch('/api/ledger?full=1')).json();
+ const blob=new Blob([JSON.stringify(full,null,2)],{type:'application/json'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+ a.download='termind-agent-ledger.json';a.click();URL.revokeObjectURL(a.href)};
 document.getElementById('sclose').onclick=()=>ss.classList.remove('open');
 ss.onclick=(e)=>{if(e.target===ss)ss.classList.remove('open')};
 document.getElementById('ssave').onclick=async()=>{

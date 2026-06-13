@@ -1388,3 +1388,97 @@ def test_send_api_returns_clickable_options(tmp_path, monkeypatch):
     d = json.loads(urllib.request.urlopen(req, timeout=5).read())
     assert d["options"] == ["Python", "Go"]
     httpd.server_close()
+
+
+# ───────────────────────── v0.20 — Agent Action Ledger ─────────────────────────
+def test_ledger_records_hash_chains_and_survives_reload():
+    from termind.ledger import Ledger
+    led = Ledger()
+    a = led.record(session="s1", tool="write", target="app.py", outcome="ok",
+                   consent="build a calculator", bytes_written=42)
+    b = led.record(session="s1", tool="run", target="python app.py", outcome="ok")
+    assert b["prev"] == a["hash"]                       # chained
+    assert led.verify()["ok"] and led.verify()["count"] == 2
+    again = Ledger()                                    # reloaded from the JSONL on disk
+    assert again.verify()["ok"] and again.summary()["count"] == 2
+    assert again.entries[0]["consent"] == "build a calculator"   # consent captured
+
+
+def test_ledger_detects_tampering():
+    from termind.ledger import Ledger
+    led = Ledger()
+    led.record(session="s", tool="write", target="a.py", outcome="ok")
+    led.record(session="s", tool="write", target="b.py", outcome="ok")
+    led.entries[0]["target"] = "evil.py"               # someone edited a past entry
+    v = led.verify()
+    assert v["ok"] is False and v["broken_at"] == 0    # the chain catches it
+
+
+def test_ledger_chain_verifies_without_the_key():
+    """A reviewer with only the exported file (no install key) can still prove no tampering."""
+    import os
+    from termind.ledger import Ledger
+    led = Ledger()
+    led.record(session="s", tool="run", target="ls", outcome="ok")
+    os.remove(os.path.join(os.environ["TERMIND_HOME"], "ledger.key"))
+    v = Ledger().verify()
+    assert v["ok"] and v["chain_ok"] and v["sig_ok"] is None   # chain proven, sig skipped
+
+
+def test_ledger_export_is_self_describing():
+    from termind.ledger import Ledger
+    led = Ledger()
+    led.record(session="s", tool="mkdir", target="proj", outcome="ok")
+    ex = led.export()
+    assert ex["artifact"] == "agent-action-ledger" and ex["integrity"]["ok"]
+    assert ex["summary"]["count"] == 1 and len(ex["entries"]) == 1
+
+
+def test_code_agent_writes_every_action_to_the_ledger(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    seq = iter([
+        _json.dumps({"tool": "mkdir", "path": "calc"}),
+        _json.dumps({"tool": "write", "path": "calc/app.py", "content": "print(1)\n"}),
+        _json.dumps({"tool": "write", "path": "../escape.py", "content": "x=1"}),  # blocked
+        _json.dumps({"tool": "done", "say": "done"}),
+    ])
+    monkeypatch.setattr(r, "chat", lambda *a, **k: next(seq))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    s.handle_web("build a calculator")
+    outs = [e["outcome"] for e in s.ledger.entries]
+    assert "ok" in outs and "blocked" in outs           # both the write and the jail-block logged
+    assert all(e["consent"] == "build a calculator" for e in s.ledger.entries)
+    assert s.ledger.verify()["ok"]                       # tamper-evident chain holds
+    assert "audit ledger" in s.do_status()               # surfaced in /status
+
+
+def test_ledger_command_and_export(tmp_path):
+    s = _session()
+    s.ledger.record(session="s", tool="run", target="pytest", outcome="ok")
+    assert "audit ledger" in s.handle("/ledger")
+    assert "VERIFIED" in s.handle("/ledger verify")
+    dest = tmp_path / "led.json"
+    out = s.handle(f"/ledger export {dest}")
+    assert "exported" in out and dest.exists()
+    assert json.loads(dest.read_text())["artifact"] == "agent-action-ledger"
+
+
+def test_ledger_api_and_settings_panel(tmp_path):
+    import threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve, PAGE
+    assert all(k in PAGE for k in ("data-s=audit", "loadAudit", "termind-agent-ledger.json"))
+    s = r.Session(live=False)
+    s.ledger.record(session="s", tool="write", target="x.py", outcome="ok", bytes_written=10)
+    httpd, url = serve(s, port=8823, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(url + "/api/ledger", timeout=3).read())
+    assert d["summary"]["count"] == 1 and d["integrity"]["ok"] and len(d["entries"]) == 1
+    httpd.server_close()
+    httpd2, url2 = serve(s, port=8824, open_browser=False)
+    threading.Thread(target=httpd2.handle_request, daemon=True).start()
+    full = json.loads(urllib.request.urlopen(url2 + "/api/ledger?full=1", timeout=3).read())
+    assert full["artifact"] == "agent-action-ledger"
+    httpd2.server_close()
