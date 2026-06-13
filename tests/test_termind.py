@@ -11,12 +11,14 @@ from aion import Capabilities
 
 @pytest.fixture
 def docs(tmp_path):
-    (tmp_path / "notes.md").write_text(
+    d = tmp_path / "docs"            # own folder so TERMIND_HOME/memory.json isn't indexed
+    d.mkdir()
+    (d / "notes.md").write_text(
         "# Standup\n\nShipped the budget kernel today.\n\n## Action items\n\n"
         "Email the investor list and review the RAG pipeline.")
-    (tmp_path / "arch.md").write_text(
+    (d / "arch.md").write_text(
         "The system runs on AION. Nothing leaves the machine, so it is private.")
-    return str(tmp_path)
+    return str(d)
 
 
 def _session():
@@ -1256,3 +1258,67 @@ def test_agent_sees_file_list(tmp_path, monkeypatch):
     (tmp_path / "main.py").write_text("x=1")
     s.handle_web("what files do we have?")
     assert "main.py" in seen["sys"]                          # the agent KNOWS its files
+
+
+def test_toolchain_detects_python():
+    from termind.toolchain import detect, summary
+    tc = detect()
+    assert "python" in tc and tc["python"]["cmd"] in ("python3", "python")
+    assert tc["python"]["version"][0].isdigit()
+    assert "python→" in summary(tc)
+
+
+def test_toolchain_cached_in_session():
+    s = _session()
+    assert s.toolchain.get("python")
+    s2 = _session()
+    assert s2.store["toolchain"].get("_detected_at")     # cached, not re-probed
+
+
+def test_compound_cd_python_command_works(tmp_path):
+    """THE transcript bug: 'cd calculator && python calculator.py' must run on a mac."""
+    s = _session()
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    (tmp_path / "calculator").mkdir()
+    (tmp_path / "calculator" / "calculator.py").write_text("print('calc ok')")
+    out = s._agent_run("cd calculator && python calculator.py")
+    assert "calc ok" in out and "not installed" not in out
+
+
+def test_agent_prompt_carries_toolchain(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    seen = {}
+    def spy(msgs, **k):
+        seen["sys"] = msgs[0]["content"]
+        return _json.dumps({"tool": "done", "say": "ok"})
+    monkeypatch.setattr(r, "chat", spy)
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    s.handle_web("hello")
+    assert "python→python" in seen["sys"]                # knows the exact interpreter
+
+
+def test_clarifying_question_not_nudged(tmp_path, monkeypatch):
+    import json as _json
+    import termind.repl as r
+    monkeypatch.setattr(r, "chat", lambda *a, **k: _json.dumps(
+        {"tool": "say", "say": "Which language should I use — Python or JavaScript?"}))
+    s = r.Session(live=True)
+    s.chat_new(mode="code"); s.set_workspace(str(tmp_path)); s.view_mode = "code"
+    out = s.handle_web("create a calculator app")
+    assert "Which language" in out and "step limit" not in out   # asks once, cleanly
+
+
+def test_settings_sections_and_toolchain_api():
+    import json, threading, urllib.request
+    import termind.repl as r
+    from termind.web import serve, PAGE
+    assert all(k in PAGE for k in ("snavi", "data-s=tools", "Toolchains",
+                                   "re-detect", "data-s=about"))
+    s = r.Session(live=False)
+    httpd, url = serve(s, port=8821, open_browser=False)
+    threading.Thread(target=httpd.handle_request, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(url + "/api/toolchain", timeout=3).read())
+    assert "python" in d["toolchain"]
+    httpd.server_close()

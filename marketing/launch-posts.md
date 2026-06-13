@@ -440,3 +440,28 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Split layout: LEFT, a faded "before" chat where a bot bubble is full of grey bash text labeled "advice 🙄"; RIGHT, the termind code view "after": three crisp executed-step rows — "✓ mkdir calculator", "✓ write index.html (14 lines)", "✓ write calculator.js (10 lines)" — each with green checks, ending in "calculator website ready ✓" with confetti. A small loop diagram above: model → tool call → execute → result → model. Top headline in bold charcoal: **"Agents should DO, not advise."** Subtitle: "termind v0.17 · tool-execution loop · per-session workspaces · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.18 — It knows your machine (toolchain auto-detection + requirements gathering)
+
+### 📣 Post
+
+> **The bug that broke the illusion: my local agent ran `python calculator.py`, got "Python is not installed", and offered to install Python — on a Mac that's had python3 for years. termind v0.18 makes that impossible.**
+>
+> 🧰 **Toolchain auto-detection** — on first boot termind probes your machine and learns exactly what languages it speaks: the real command (python → **python3** on macOS!), the version, and where it lives. Node, Go, Rust, Java, Ruby, PHP, Swift, git, docker. See it all in Settings → Toolchains.
+> 🔧 **Smart command rewriting** — every command the agent runs gets the right interpreter substituted automatically. `cd app && python main.py` silently becomes `… python3 main.py`. The "not installed" gaslighting is dead.
+> 🗣️ **It asks first** — say "create a calculator app" and the agent now asks: which language? CLI or web? key features? — then builds to YOUR spec instead of guessing.
+> ⚙️ **Claude-style Settings** — a proper left-nav settings panel: Profile · Appearance · Memory · Toolchains · Help · About. Click your name to open it.
+>
+> Stubs filtered (the fake macOS java shim doesn't count), cached for a week, re-detect anytime.
+>
+> Local · private · $0 · 120 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #ClaudeCode #OpenSource #BuildInPublic #DeveloperTools
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: the termind Settings panel in Claude style — a left nav (Profile, Appearance, Memory, **Toolchains** highlighted, Help, About) and a main pane listing auto-detected runtimes as monospace rows: "python → python3 · 3.14 · /usr/bin", "node → node · 23.7", "rust → cargo · 1.91", "git → 2.50", each with a green check. A small inset chat shows "cd app && python main.py" being rewritten to "python3 main.py ✓". Top headline in bold charcoal: **"Your agent knows what your machine speaks."** Subtitle: "termind v0.18 · toolchain auto-detection · smart command rewriting · asks before building · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

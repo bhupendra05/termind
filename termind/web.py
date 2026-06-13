@@ -63,6 +63,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(self.session.model_catalog()))
         if self.path == "/api/profile":
             return self._send(200, json.dumps(self.session.profile()))
+        if self.path == "/api/toolchain":
+            return self._send(200, json.dumps({"toolchain": self.session.toolchain}))
         if self.path == "/api/help":
             from .helpdocs import TOPICS
             return self._send(200, json.dumps({"topics": TOPICS}))
@@ -158,6 +160,9 @@ class _Handler(BaseHTTPRequestHandler):
                         {"path": req.get("path", ""),
                          "content": s.ws_read(str(req.get("path", "")))}))
             return self._send(400, json.dumps({"error": "bad op"}))
+        if self.path == "/api/toolchain":
+            return self._send(200, json.dumps(
+                {"toolchain": self.session.refresh_toolchain()}))
         if self.path == "/api/mode":
             out = self.session.set_mode(str(req.get("mode", "")))
             return self._send(200, json.dumps({"reply": out,
@@ -349,6 +354,24 @@ line-height:1.6}
 padding:9px 12px;color:var(--ink);font-family:inherit;font-size:12.5px;outline:none;
 transition:border-color .15s}
 #mspec:focus{border-color:var(--clay)}
+.spanel{display:flex;gap:0;padding:0;width:640px;overflow:hidden}
+.snav{width:172px;background:color-mix(in srgb,var(--bg) 55%,var(--side));padding:16px 10px;
+border-right:1px solid var(--line);display:flex;flex-direction:column;gap:3px;flex:none}
+.snavh{font-weight:700;font-size:15px;padding:2px 10px 12px}
+.snavi{text-align:left;border:0;background:transparent;color:var(--dim);border-radius:9px;
+padding:9px 11px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;
+transition:all .15s}
+.snavi:hover{background:var(--card);color:var(--ink)}
+.snavi.on{background:var(--card);color:var(--clay)}
+.sbody{flex:1;padding:20px 22px;overflow-y:auto;max-height:78vh}
+.spane{display:none;animation:fade .25s ease}
+.spane.on{display:block}
+.trow{display:flex;gap:10px;padding:8px 10px;border-radius:8px;font-size:12.5px;
+font-family:'JetBrains Mono',monospace;align-items:center}
+.trow:hover{background:var(--card)}
+.trow .tl{width:70px;font-weight:700;color:var(--clay)}
+.trow .tv{color:var(--green);width:80px}
+.trow .tp{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .obpanel{width:480px;padding:34px 36px 28px}
 .obmark{width:58px;height:58px;margin:0 auto 16px;border-radius:17px;display:grid;
 place-items:center;font-size:26px;color:#fff;
@@ -498,34 +521,63 @@ animation:confl .9s ease-out forwards;z-index:60}
   </div>
   <button class=mbtn id=obgo style="margin-top:16px;background:var(--clay);color:#fff;border:0;padding:10px 26px">Start →</button>
 </div></div>
-<div class=overlay id=ss><div class=panel>
-  <h2>☰ Settings</h2>
-  <div class=sub>everything is stored locally · nothing leaves your machine</div>
-  <div class=label style="padding-left:0">profile</div>
-  <input id=sname class=sin placeholder="your name">
-  <input id=srole class=sin placeholder="your role (fed to the model)">
-  <input id=sprefs class=sin placeholder="answer style, e.g. short and direct">
-  <div class=label style="padding-left:0;margin-top:10px">theme</div>
-  <div style="display:flex;gap:8px">
-    <button class="mbtn tbtn" data-t=dark>🌙 dark</button>
-    <button class="mbtn tbtn" data-t=light>☀️ light</button>
-    <button class="mbtn tbtn" data-t=cyber>🌆 cyberpunk</button>
+<div class=overlay id=ss><div class="panel spanel">
+  <div class=snav>
+    <div class=snavh>Settings</div>
+    <button class="snavi on" data-s=profile>👤 Profile</button>
+    <button class=snavi data-s=appearance>🎨 Appearance</button>
+    <button class=snavi data-s=memory>🧠 Memory</button>
+    <button class=snavi data-s=tools>🧰 Toolchains</button>
+    <button class=snavi data-s=help>📖 Help</button>
+    <button class=snavi data-s=about>▲ About</button>
   </div>
-  <div class=label style="padding-left:0;margin-top:14px">memory</div>
-  <textarea id=smem class=sin rows=3 placeholder="paste memories exported from ChatGPT/Claude — one per line — and click import"></textarea>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button class=mbtn id=smemimp>⬆ import</button>
-    <button class=mbtn id=smemexp>⬇ export mine</button>
-    <button class=mbtn id=smemclr>🗑 clear facts</button>
-    <button class=mbtn id=schatclr>🗑 clear all chats</button>
-  </div>
-  <div class=ds id=smemout style="padding:6px 2px"></div>
-  <div class=label style="padding-left:0;margin-top:14px">help & workflows</div>
-  <div id=shelp></div>
-  <div class=ds style="padding:6px 2px">or just ask in chat: <b style="color:var(--clay);cursor:pointer" id=shask>"what are termind's limitations?"</b></div>
-  <div style="text-align:right;margin-top:14px">
-    <button class=mbtn id=ssave style="background:var(--clay);color:#fff;border:0">Save</button>
-    <button class=mbtn id=sclose>Close</button>
+  <div class=sbody>
+  <section class="spane on" data-s=profile>
+    <h2>Profile</h2>
+    <div class=sub>fed to the model so every reply fits you · stored locally only</div>
+    <input id=sname class=sin placeholder="your name">
+    <input id=srole class=sin placeholder="your role (fed to the model)">
+    <input id=sprefs class=sin placeholder="answer style, e.g. short and direct">
+    <button class=mbtn id=ssave style="background:var(--clay);color:#fff;border:0;margin-top:8px">Save profile</button>
+  </section>
+  <section class=spane data-s=appearance>
+    <h2>Appearance</h2>
+    <div class=sub>one click · remembered everywhere</div>
+    <div style="display:flex;gap:8px">
+      <button class="mbtn tbtn" data-t=dark>🌙 dark</button>
+      <button class="mbtn tbtn" data-t=light>☀️ light</button>
+      <button class="mbtn tbtn" data-t=cyber>🌆 cyberpunk</button>
+    </div>
+  </section>
+  <section class=spane data-s=memory>
+    <h2>Memory</h2>
+    <div class=sub>your facts are portable — bring them from anywhere, take them anywhere</div>
+    <textarea id=smem class=sin rows=3 placeholder="paste memories exported from ChatGPT/Claude — one per line — and click import"></textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class=mbtn id=smemimp>⬆ import</button>
+      <button class=mbtn id=smemexp>⬇ export mine</button>
+      <button class=mbtn id=smemclr>🗑 clear facts</button>
+      <button class=mbtn id=schatclr>🗑 clear all chats</button>
+    </div>
+    <div class=ds id=smemout style="padding:6px 2px"></div>
+  </section>
+  <section class=spane data-s=tools>
+    <h2>Toolchains</h2>
+    <div class=sub>auto-detected languages on THIS machine — the code agent uses these exact commands</div>
+    <div id=stools></div>
+    <button class=mbtn id=stoolref style="margin-top:8px">↻ re-detect</button>
+  </section>
+  <section class=spane data-s=help>
+    <h2>Help & workflows</h2>
+    <div id=shelp></div>
+    <div class=ds style="padding:6px 2px">or just ask in chat: <b style="color:var(--clay);cursor:pointer" id=shask>"what are termind's limitations?"</b></div>
+  </section>
+  <section class=spane data-s=about>
+    <h2>About termind</h2>
+    <div class=sub id=sabout></div>
+    <div class=ds>a local AI agent — terminal + web, one brain.<br>private · $0/query · sandboxed on AION · localhost only.<br><br>github.com/bhupendra05/termind</div>
+  </section>
+  <div style="text-align:right;margin-top:10px"><button class=mbtn id=sclose>Close</button></div>
   </div>
 </div></div>
 <div class=overlay id=mm><div class=panel>
@@ -735,6 +787,22 @@ document.getElementById('mecard').onclick=async()=>{ss.classList.add('open');
   d.className='htop';d.innerHTML='<b>'+k+'</b><div class=hb></div>';
   d.querySelector('.hb').textContent=v;
   d.onclick=()=>d.classList.toggle('open');sh.appendChild(d)})};
+document.querySelectorAll('.snavi').forEach(b=>b.onclick=()=>{
+ document.querySelectorAll('.snavi').forEach(x=>x.classList.toggle('on',x===b));
+ document.querySelectorAll('.spane').forEach(p=>p.classList.toggle('on',p.dataset.s==b.dataset.s));
+ if(b.dataset.s=='tools')loadTools();
+ if(b.dataset.s=='about')document.getElementById('sabout').textContent='version '+ver.textContent;});
+async function loadTools(refresh){const d=await (refresh
+ ?await fetch('/api/toolchain',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+ :await fetch('/api/toolchain')).json();
+ const el=document.getElementById('stools');el.innerHTML='';
+ Object.entries(d.toolchain).filter(([k])=>!k.startsWith('_')).forEach(([k,v])=>{
+  const r=document.createElement('div');r.className='trow';
+  r.innerHTML='<span class=tl></span><span class=tv></span><span class=tp></span>';
+  r.querySelector('.tl').textContent=k;
+  r.querySelector('.tv').textContent=v.cmd+' '+v.version;
+  r.querySelector('.tp').textContent=v.path;el.appendChild(r)})}
+document.getElementById('stoolref').onclick=()=>loadTools(true);
 document.getElementById('sclose').onclick=()=>ss.classList.remove('open');
 ss.onclick=(e)=>{if(e.target===ss)ss.classList.remove('open')};
 document.getElementById('ssave').onclick=async()=>{

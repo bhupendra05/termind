@@ -34,6 +34,7 @@ CATALOG = [
     ("llava", "4.7 GB", "dedicated vision model"),
 ]
 from .helpdocs import DOC as HELP_DOC, best_topic
+from . import toolchain as tcmod
 from .store import load as store_load, save as store_save
 
 # "edit/fix/update <file.ext>: <instruction>" → the file-editing engine (code mode).
@@ -268,6 +269,13 @@ class Session:
         self.last_image = None       # (name, base64) of the most recent image, for /edit
         self._pending_remove = None  # target of a failed removal awaiting "where is it"
         self.pull = {"status": "idle"}  # background model download state (web progress bar)
+        # toolchain: detect once, cache for a week (what languages this machine speaks)
+        tc = self.store.get("toolchain") or {}
+        if not tc or time.time() - tc.get("_detected_at", 0) > 7 * 86400:
+            tc = tcmod.detect()
+            self.store["toolchain"] = tc
+            store_save(self.store)
+        self.toolchain = tc
 
     # ── chat sessions: new chat, continue previous, switch ───────────────────
     def _new_chat_id(self) -> str:
@@ -1025,14 +1033,19 @@ class Session:
         '{{"tool":"say","say":"<reply>"}}  only for pure conversation/questions\n'
         "Multi-file tasks: ONE tool call per turn, then wait for the RESULT. A build task is "
         "NOT done until every file is WRITTEN with the write tool — after mkdir, immediately "
-        "write the files. If the user says 'yes', 'do it', 'run it' — CONTINUE with tools.")
+        "write the files. If the user says 'yes', 'do it', 'run it' — CONTINUE with tools.\n"
+        "NEW PROJECT requests with no language/details chosen: FIRST use the say tool to ask "
+        "2-3 short questions (which language? CLI or web? key features?). After they answer, "
+        "build immediately without asking again. Installed toolchains on THIS machine "
+        "(use these exact commands): {tools}")
 
     def do_code_agent(self, text: str) -> str:
         """Code-session messages go through a real act-observe loop: the model calls
         tools, termind EXECUTES them, results feed back. No more command-printing."""
         if self.agent_mode == "plan":
             return self.do_plan(text)
-        sys_p = self.CODE_SYS.format(ws=self.workspace())
+        sys_p = self.CODE_SYS.format(ws=self.workspace(),
+                                     tools=tcmod.summary(self.toolchain) or "unknown")
         listing = self._ws_filelist()
         if listing:
             sys_p += "\nFiles currently in the workspace: " + listing
@@ -1053,7 +1066,8 @@ class Session:
                 wrote = any(line.startswith("✓ write") for line in log)
                 buildish = re.search(r"\b(create|build|make|website|project|app|tool|script)\b",
                                      text, re.I)
-                if not wrote and buildish and nudges < 2:   # stopped before writing files?
+                asking = "?" in str(act.get("say") or "")
+                if not wrote and buildish and nudges < 2 and not asking:
                     nudges += 1
                     msgs += [{"role": "assistant", "content": json.dumps(act)},
                              {"role": "user", "content":
@@ -1134,8 +1148,10 @@ class Session:
         return ", ".join(e["path"] for e in self.ws_tree(limit) if not e["dir"])
 
     def _agent_run(self, cmd: str) -> str:
+        cmd = self._fix_lang_cmds(cmd)
         tok = cmd.split()
         ws = self.workspace()
+        compound = "&&" in cmd or ";" in cmd or cmd.strip().startswith("cd ")
         # "app.py" or a wrong absolute path → find the real file in the workspace
         if tok and tok[0].endswith(".py"):
             cand = tok[0]
@@ -1147,7 +1163,7 @@ class Session:
                     cand = hits[0]
             if os.path.isfile(os.path.join(ws, cand)):
                 cmd = "python3 " + cand + (" " + " ".join(tok[1:]) if tok[1:] else "")
-        checked = self._dry_run(cmd)
+        checked = cmd if compound else self._dry_run(cmd)
         if not checked:
             return (f"can't run — '{cmd.split()[0] if cmd.split() else cmd}' not found. "
                     f"Files present: {self._ws_filelist() or '(none)'}")
@@ -1250,6 +1266,21 @@ class Session:
             f.write(new)
         self.actions += 1
         return f"edited {rel} (±{max(changed-2,0)} lines) — open it: /read {rel}"
+
+    def refresh_toolchain(self) -> dict:
+        self.toolchain = tcmod.detect()
+        self.store["toolchain"] = self.toolchain
+        store_save(self.store)
+        return self.toolchain
+
+    def _fix_lang_cmds(self, cmd: str) -> str:
+        """Rewrite bare interpreter names ANYWHERE in the command to the detected ones
+        (e.g. 'cd app && python main.py' → '… python3 main.py' on a python3-only Mac)."""
+        py = (self.toolchain.get("python") or {}).get("cmd")
+        if py and py != "python":
+            cmd = re.sub(r"\bpython\b(?!3)", py, cmd)
+            cmd = re.sub(r"\bpip\b(?!3)", "pip3" if py == "python3" else "pip", cmd)
+        return cmd
 
     # ── code mode: workspace, file tree, file reading ────────────────────────
     def set_workspace(self, path: str) -> str:
@@ -1589,6 +1620,13 @@ class Session:
                 return "usage: /chat new · /chat <n> · /chat delete <n>"
             self.chat_open(cid)
             return f"resumed: {self.store['chats'][cid]['title']} ({len(self.history)} messages)"
+        if line.startswith("/tools"):
+            if "refresh" in line:
+                self.refresh_toolchain()
+            rows = [f"{k:<8} {v['cmd']:<10} {v['version']:<12} {v['path']}"
+                    for k, v in self.toolchain.items() if not k.startswith("_")]
+            return ("detected toolchains (auto):\n" + "\n".join(rows)
+                    + "\nrefresh: /tools refresh") if rows else "none detected — /tools refresh"
         if line == "/mode" or line.startswith("/mode "):
             return self.set_mode(line[5:].strip() or "")
         if line.startswith("/ws"):
@@ -1696,6 +1734,8 @@ class Session:
             return _panel("MODEL BAY", out.replace("\n", f"\n{PU}│{N} "), PU)
         if s.startswith(("/chats", "/chat")):
             return _panel("SESSIONS", out.replace("\n", f"\n{CY}│{N} "), CY)
+        if s.startswith("/tools"):
+            return _panel("TOOLCHAINS", out.replace("\n", f"\n{GR}│{N} "), GR)
         if s == "/mode" or s.startswith("/mode "):
             return _panel("AGENT MODE", out, YL)
         if s.startswith(("/ws", "/tree", "/read")):
