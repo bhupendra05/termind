@@ -1482,3 +1482,64 @@ def test_ledger_api_and_settings_panel(tmp_path):
     full = json.loads(urllib.request.urlopen(url2 + "/api/ledger?full=1", timeout=3).read())
     assert full["artifact"] == "agent-action-ledger"
     httpd2.server_close()
+
+
+# ───────────────────── v0.21 — Consent Escalation (frontier-on-consent) ─────────────────────
+def test_reach_stays_local_without_a_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = _session()
+    out = s.do_reach("what is 2+2")
+    assert "100% local" in out
+    assert not any(e["tool"] == "escalate" for e in s.ledger.entries)   # nothing left the machine
+    assert "data off-machine: 0 bytes" in s.do_status()
+
+
+def test_reach_escalates_and_logs_every_byte(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(r, "claude_chat", lambda msgs: "the frontier answer")
+    s = _session()
+    out = s.do_reach("design a B-tree")
+    assert "the frontier answer" in out
+    esc = [e for e in s.ledger.entries if e["tool"] == "escalate"]
+    assert len(esc) == 1 and esc[0]["outcome"] == "ok" and esc[0]["bytes"] > 0
+    assert esc[0]["consent"] == "design a B-tree"          # the authorizing message is recorded
+    assert "cloud:" in esc[0]["target"]
+    assert s.ledger.verify()["ok"]                          # the escalation is in the sealed chain
+    off = s.do_status().split("data off-machine:")[1]
+    assert "0 bytes" not in off and "consented cloud escalation" in off   # status is truthful now
+
+
+def test_think_cloud_rung_is_now_audited(monkeypatch):
+    """The pre-existing /think -> Claude path used to leave the machine UNLOGGED; now it's sealed."""
+    import termind.repl as r
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("TERMIND_BIG_MODEL", raising=False)
+    monkeypatch.setattr(r, "claude_chat", lambda msgs: "cloud reasoning")
+    s = _session()
+    assert "cloud reasoning" in s.do_think("prove it")
+    assert any(e["tool"] == "escalate" for e in s.ledger.entries)
+
+
+def test_frontier_failure_is_logged_and_falls_back(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    def boom(msgs):
+        raise RuntimeError("network down")
+    monkeypatch.setattr(r, "claude_chat", boom)
+    s = _session()
+    out = s.do_reach("hello")
+    assert "unreachable" in out and "staying local" in out
+    esc = [e for e in s.ledger.entries if e["tool"] == "escalate"]
+    assert esc and esc[0]["outcome"] == "fail"             # the attempt itself is on the record
+
+
+def test_reach_over_web_routes_and_logs(monkeypatch):
+    import termind.repl as r
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(r, "claude_chat", lambda msgs: "web frontier answer")
+    s = r.Session(live=False)
+    out = s.handle_web("/reach explain quicksort")
+    assert "web frontier answer" in out
+    esc = [e for e in s.ledger.entries if e["tool"] == "escalate"]
+    assert len(esc) == 1 and esc[0]["bytes"] > 0           # the web path is audited too

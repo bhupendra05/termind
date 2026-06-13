@@ -130,6 +130,7 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/index <folder>{N}  {D}»{N} absorb your files into agent memory
 {CY}║{N}  {GR}◉{N} {WH}/ask <question>{N}  {D}»{N} query YOUR data · answers cite sources
 {CY}║{N}  {GR}◉{N} {WH}/think <hard q>{N}  {D}»{N} escalate: big model › cloud › deep local
+{CY}║{N}  {GR}◉{N} {WH}/reach <q>{N}       {D}»{N} private-by-exception: frontier model, consented + logged
 {CY}║{N}  {GR}◉{N} {WH}/do <task>{N}       {D}»{N} proposes a shell command · runs on YOUR y/N
 {CY}║{N}  {GR}◉{N} {WH}/build <idea>{N}    {D}»{N} scaffold a project · write code · open VS Code
 {CY}║{N}  {GR}◉{N} {WH}/write <file> <spec>{N} {D}» generate one file (preview + y/N){N}
@@ -400,6 +401,49 @@ class Session:
         return "\n".join(f"{h['score']:.2f}  [{h['key']}]  "
                          + " ".join(str(h['value']).split())[:160] for h in hits)
 
+    def frontier_ready(self) -> bool:
+        """Is consented cloud escalation available? (only if the user set a key)"""
+        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    def _frontier(self, messages: list, consent: str = "", why: str = "escalation") -> str:
+        """The ONE path off this machine: a frontier cloud model, on explicit consent, ALWAYS
+        logged. termind is private by default — this is the audited exception. Records the byte
+        count that leaves the machine into the tamper-evident ledger; raises if no key/unreachable
+        so callers can fall back to local."""
+        if not self.frontier_ready():
+            raise RuntimeError("no ANTHROPIC_API_KEY — staying local")
+        model = os.environ.get("TERMIND_CLOUD_MODEL", "claude-sonnet-4-6")
+        nbytes = len(json.dumps(messages).encode())
+        cid = self.store.get("active_chat") or "default"
+        try:
+            reply = claude_chat(messages)
+        except Exception as e:
+            self.ledger.record(session=cid, tool="escalate", target=f"cloud:{model}",
+                               outcome="fail", consent=consent, bytes_written=nbytes,
+                               detail=str(e)[:120])
+            raise
+        self.ledger.record(session=cid, tool="escalate", target=f"cloud:{model}",
+                           outcome="ok", consent=consent, bytes_written=nbytes, detail=why)
+        return reply
+
+    def do_reach(self, q: str) -> str:
+        """Explicitly escalate ONE query to the frontier cloud model — private-by-exception,
+        every byte that leaves the machine logged in the audit ledger. Nothing leaves unless
+        you run this."""
+        if not q.strip():
+            return "usage: /reach <question> — escalate one query to the frontier model (logged)"
+        if not self.frontier_ready():
+            return ("frontier escalation is off — termind is 100% local until you set "
+                    "ANTHROPIC_API_KEY. When you do, every escalation is consented and logged "
+                    "in /ledger, and /status shows the exact bytes that left the machine.")
+        with Thinking("reaching the frontier model"):
+            try:
+                ans = self._frontier(self.chat_messages(q), consent=q, why="/reach")
+            except Exception as e:
+                return f"frontier unreachable: {e} — staying local."
+        return (ans + "\n\n— escalated to the cloud on your request · logged in /ledger · "
+                "/status shows bytes off-machine")
+
     def do_think(self, q: str) -> str:
         """Escalation ladder for hard questions: big local model → Claude → deep local CoT."""
         with Thinking("deep thinking"):
@@ -409,9 +453,9 @@ class Session:
                     return chat(self.chat_messages(q + "\n\nThink step by step."), model=big)
                 except RuntimeError:
                     pass  # big model not pulled → next rung
-            if os.environ.get("ANTHROPIC_API_KEY"):
+            if self.frontier_ready():
                 try:
-                    return claude_chat(self.chat_messages(q))
+                    return self._frontier(self.chat_messages(q), consent=q, why="/think cloud rung")
                 except Exception:
                     pass  # cloud unreachable → next rung
             if self.live:
@@ -1598,11 +1642,16 @@ class Session:
         else:
             brain = "offline brain (run ./setup.sh)"
         led = self.ledger.summary()
+        esc = [e for e in self.ledger.entries
+               if e.get("tool") == "escalate" and e.get("outcome") == "ok"]
+        off = sum(int(e.get("bytes", 0)) for e in esc)
+        off_str = (f"{off} bytes across {len(esc)} consented cloud escalation(s), all logged"
+                   if esc else "0 bytes")
         return (f"brain: {brain} · facts remembered: {len(self.store['facts'])} · "
                 f"indexed chunks: {self.chunks} · chat turns kept: {len(self.history)} · "
                 f"actions run: {getattr(self, 'actions', 0)} · credits spent: {self.spent:.2f} · "
                 f"denied by sandbox: {self.denied} · audit ledger: {led['count']} actions "
-                f"({led['integrity']}) · data off-machine: 0 bytes")
+                f"({led['integrity']}) · data off-machine: {off_str}")
 
     def _ledger_report(self, line: str) -> str:
         """`/ledger` (recent + integrity) · `/ledger verify` · `/ledger export [path]`."""
@@ -1658,6 +1707,8 @@ class Session:
         if line.startswith("/think"):
             q = line[6:].strip()
             return self.do_think(q) if q else "usage: /think <hard question>"
+        if line.startswith("/reach"):
+            return self.do_reach(line[6:].strip())
         if line.startswith("/img"):
             return self.do_img(line[4:].strip())
         if line.startswith("/edit"):

@@ -518,3 +518,32 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a vertical chain of 4 audit-log "blocks", each a rounded monospace card showing `tool: write · target: calculator/app.py · outcome: ok` with a small `#hash → prev` link drawn between them like chain links. The 4th block is red, labeled `outcome: blocked · ../../etc/passwd`. To the right, a tampered block glows red with a broken chain-link icon and a bold "⚠ TAMPERED @ #3" badge; on the left a green "✓ VERIFIED — chain intact" badge. A small lock + "export" download glyph sits at the bottom. Top headline in bold charcoal: **"Private isn't enough. Make it provable."** Subtitle: "termind v0.20 · tamper-evident agent action ledger · hash-chained + signed · verify offline · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v0.21 — Consent Escalation (private by default, frontier on consent — every byte logged)
+
+### 📣 Post
+
+> **"Local models are dumb — just use the cloud." It's the #1 attack on any private AI agent. termind v0.21 answers it without giving up an inch of privacy.**
+>
+> termind is 100% local by default. But when a problem is genuinely too hard for the local model, you can escalate ONE step to a frontier model — **on explicit consent, and every byte that leaves your machine is logged in the tamper-evident audit ledger.**
+>
+> 🛰️ **`/reach <question>`** — deliberately send one query to the frontier model. Private-by-exception, not private-by-accident.
+> 🔒 **One path off the machine** — I funneled every cloud call through a single `_frontier()` chokepoint. There is no unlogged way out. (This caught a real bug: the old `/think`→cloud path was leaving the machine *silently* while `/status` still claimed "0 bytes off-machine." Not anymore.)
+> 🧾 **`/status` tells the truth** — "0 bytes off-machine" by default, or "832 bytes across 1 consented cloud escalation, all logged" — and that number is derived from the **tamper-evident ledger**, so it can't lie.
+> 🧪 Live-verified: escalate a query, watch the bytes appear in the ledger with the exact message that authorized them — then try to edit the entry to hide the cloud call. termind catches it.
+>
+> Most "private" tools ask you to trust a promise. termind makes the privacy boundary **auditable** — every exception to "nothing leaves this machine" is consented, counted, and sealed in a chain you can verify offline.
+>
+> **Private by default. Frontier on consent. Every exception provable.**
+>
+> Local · private · $0 · 136 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #AgenticAI #AITrust #Privacy #Compliance #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Center: a laptop labeled "LOCAL · private" with a soft shield around it; a single dashed arrow leaves it upward to a small cloud labeled "frontier model", and on that arrow sits a glowing toll-gate with a green "✓ consented" check and a tag reading "832 bytes · logged". Below the laptop, a monospace status line: `data off-machine: 832 bytes across 1 consented cloud escalation — all logged`. To the right, a small audit-ledger card shows an `escalate · cloud:claude · 832 bytes` row with a "✓ verified" badge. Top headline in bold charcoal: **"Private by default. Frontier on consent. Every byte logged."** Subtitle: "termind v0.21 · /reach · one audited path off the machine · verifiable offline · $0 · local." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
