@@ -78,13 +78,13 @@ _RULES = [
     ("insurance",   r"\b(insurance|lic\b|premium|hdfc life|policy)\b",      "Insurance", None, "Payment"),
     ("interest",    r"\b(interest|int\.?\s*(pd|paid|cr|coll))\b",
                     "Interest Expense", "Interest Income", "Payment"),
-    ("bankcharge",  r"\b(bank\s*charge|chrg|chg\b|amc|sms chg|min(imum)? bal|nwd|proc(essing)? fee|annual fee|imps chg|neft chg)\b",
+    ("bankcharge",  r"\b(bank\s*charges?|chrg|chg\b|amc|sms chg|min(imum)? bal|nwd|proc(essing)? fees?|annual fee|imps chg|neft chg)\b",
                     "Bank Charges", None, "Payment"),
     ("loan",        r"\b(emi|loan|ecs|nach|repayment|installment|instalment)\b",
                     "Loan Repayment", "Loan Received", "Payment"),
     ("dividend",    r"\b(dividend|div\b)\b",                                None, "Dividend Income", "Receipt"),
     ("refund",      r"\b(refund|reversal|revrsl|returned|chargeback)\b",    None, "Refund Received", "Receipt"),
-    ("purchase",    r"\b(amazon|flipkart|reliance retail|dmart|purchase|vendor|supplier)\b",
+    ("purchase",    r"\b(amazon|flipkart|reliance retail|dmart|purchases?|vendor|supplier)\b",
                     "Purchases", None, "Payment"),
     ("welfare",     r"\b(swiggy|zomato|restaurant|canteen|tea|coffee)\b",   "Staff Welfare", None, "Payment"),
     ("courier",     r"\b(dtdc|bluedart|delhivery|courier|postage|fedex)\b", "Postage & Courier", None, "Payment"),
@@ -166,6 +166,9 @@ _COLS = {
                "deposits", "credit amount", "amount credited"),
     "balance": ("balance", "closing balance", "running balance", "available balance"),
     "ref": ("ref", "ref no", "reference", "cheque", "chq", "chq no", "cheque no", "ref no."),
+    # fallback layout: a single signed "amount" column, optionally with a Dr/Cr indicator
+    "amount": ("amount", "amount (inr)", "amount(inr)", "txn amount", "transaction amount", "amt"),
+    "type": ("type", "dr/cr", "drcr", "cr/dr", "dr / cr", "transaction type", "indicator", "txn type"),
 }
 
 
@@ -229,6 +232,7 @@ def parse_rows(rows: list) -> list:
             "couldn't find a Date + Narration header — check the file, or pass an explicit mapping")
     txns = []
     di, ci = header.get("debit"), header.get("credit")
+    ai, ti = header.get("amount"), header.get("type")
     for r in rows[start:]:
         if not any(str(c).strip() for c in r):
             continue
@@ -238,9 +242,20 @@ def parse_rows(rows: list) -> list:
             continue
         debit = _num(r[di]) if di is not None and di < len(r) else 0.0
         credit = _num(r[ci]) if ci is not None and ci < len(r) else 0.0
-        # single amount column (sign carries direction) if there's no split debit/credit
         if di is None and ci is None:
-            continue
+            # fallback layout: one signed "amount" column, with the direction from a Dr/Cr
+            # indicator column if present, otherwise from the sign (negative = money out).
+            if ai is None or ai >= len(r):
+                continue
+            amt = _num(r[ai])
+            if amt == 0.0:
+                continue
+            tcell = str(r[ti]).strip().lower() if ti is not None and ti < len(r) else ""
+            if tcell:
+                is_debit = tcell.startswith("d") or "withdraw" in tcell or "out" in tcell
+            else:
+                is_debit = amt < 0
+            debit, credit = (abs(amt), 0.0) if is_debit else (0.0, abs(amt))
         bal = _num(r[header["balance"]]) if "balance" in header and header["balance"] < len(r) else None
         ref = str(r[header["ref"]]).strip() if "ref" in header and header["ref"] < len(r) else ""
         if debit == 0.0 and credit == 0.0:

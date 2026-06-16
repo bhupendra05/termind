@@ -690,9 +690,9 @@ animation:confl .9s ease-out forwards;z-index:60}
     <h2>CA workbench</h2>
     <div class=sub>built for chartered accountants who can't put client data in cloud tools. Every step runs on THIS machine with the local model, and each parse + export is sealed into the audit ledger — your DPDP "data never left the device" proof. Section 1 of the roadmap is live; scrutiny, GST, notices and financial statements follow.</div>
     <div class=catab style="font-weight:600;margin:12px 0 6px">📒 Bank statement → Tally</div>
-    <div class=sub>upload a bank statement (CSV / Excel / PDF) or name one in your workspace. termind classifies every line to a ledger head + voucher (rules first, the local model for the rest) and writes ready-to-import Tally vouchers.</div>
+    <div class=sub>upload a CSV bank statement, or name any statement (CSV/Excel/PDF) already in your workspace. termind classifies every line to a ledger head + voucher (rules first, the local model for the rest) and writes ready-to-import Tally vouchers.</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">
-      <input type=file id=cafile accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf" class=sin style="flex:1;padding:7px">
+      <input type=file id=cafile accept=".csv,.txt,.tsv" class=sin style="flex:1;padding:7px">
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <input id=capath class=sin style="flex:1" placeholder="…or a file already in your workspace, e.g. hdfc_apr.csv">
@@ -706,7 +706,7 @@ animation:confl .9s ease-out forwards;z-index:60}
     <div class=catab style="font-weight:600;margin:20px 0 6px;border-top:1px solid var(--line);padding-top:16px">🔍 Ledger scrutiny</div>
     <div class=sub>flag round numbers, duplicates, weekend entries, unusual spikes, missing narrations, and possible personal expenses — a first-pass review, locally.</div>
     <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
-      <input type=file id=scrfile accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf" class=sin style="flex:1;padding:7px">
+      <input type=file id=scrfile accept=".csv,.txt,.tsv" class=sin style="flex:1;padding:7px">
       <input id=scrpath class=sin style="flex:1" placeholder="…or a workspace file (xlsx/pdf)">
       <button class=mbtn id=scrrun style="background:var(--clay);color:#fff;border:0">→ scrutinize</button>
     </div>
@@ -718,10 +718,10 @@ animation:confl .9s ease-out forwards;z-index:60}
     <div class=sub>match the purchase register against GSTR-2B → ITC at risk, ITC available unbooked, value mismatches, and probable invoice-number typos.</div>
     <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
       <label class=sub style="flex:0 0 100%;margin:0">purchase register (your books)</label>
-      <input type=file id=gstbooks accept=".csv,.xlsx,.xls" class=sin style="flex:1;padding:7px">
+      <input type=file id=gstbooks accept=".csv" class=sin style="flex:1;padding:7px">
       <input id=gstbookspath class=sin style="flex:1" placeholder="…or workspace file">
       <label class=sub style="flex:0 0 100%;margin:6px 0 0">GSTR-2B (from the portal)</label>
-      <input type=file id=gstportal accept=".csv,.xlsx,.xls" class=sin style="flex:1;padding:7px">
+      <input type=file id=gstportal accept=".csv" class=sin style="flex:1;padding:7px">
       <input id=gstportalpath class=sin style="flex:1" placeholder="…or workspace file">
       <button class=mbtn id=gstrun style="background:var(--clay);color:#fff;border:0;flex:0 0 100%;margin-top:6px">→ reconcile</button>
     </div>
@@ -744,7 +744,7 @@ animation:confl .9s ease-out forwards;z-index:60}
     <div class=catab style="font-weight:600;margin:20px 0 6px;border-top:1px solid var(--line);padding-top:16px">📊 Financial statements (Schedule III)</div>
     <div class=sub>turn a trial balance into a grouped Balance Sheet + Statement of Profit &amp; Loss per Schedule III, with totals and a balance check.</div>
     <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
-      <input type=file id=fsfile accept=".csv,.xlsx,.xls" class=sin style="flex:1;padding:7px">
+      <input type=file id=fsfile accept=".csv" class=sin style="flex:1;padding:7px">
       <input id=fspath class=sin style="flex:1" placeholder="…or a workspace file (xlsx)">
       <button class=mbtn id=fsrun style="background:var(--clay);color:#fff;border:0">→ build statements</button>
     </div>

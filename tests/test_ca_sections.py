@@ -37,6 +37,13 @@ def test_scrutiny_duplicates_and_weekend_and_missing():
     assert "missing narration" in kinds
 
 
+def test_scrutiny_recurring_entries_not_flagged_as_duplicate():
+    # identical monthly rent ~30 days apart is legitimate recurring, not a double entry
+    txns = [Txn(f"2025-{m:02d}-15", "Office rent", debit=25000.0) for m in range(1, 6)]
+    flags = scrutiny.scrutinize(txns)
+    assert not any(f.kind == "possible duplicate" for f in flags)
+
+
 def test_scrutiny_outlier_spike():
     txns = [Txn(f"2025-04-{d:02d}", f"routine exp {d}", debit=400.0 + d * 10) for d in range(1, 13)]
     txns.append(Txn("2025-04-15", "Capital machinery purchase", debit=2_000_000.0))
@@ -176,6 +183,54 @@ def test_statements_balance_and_profit():
 def test_unmapped_ledger_falls_back_without_brain():
     mapped = finstmt.map_to_schedule3([finstmt.LedgerBalance("Zyzzyx Suspense", 5000.0, 0.0)])
     assert mapped[0]["statement"] == "BS" and mapped[0]["basis"] == "fallback"
+
+
+def test_finstmt_rule_ordering_avoids_bank_traps():
+    # "Bank charges" must be an expense (not an asset), "Bank overdraft" a liability (not cash) —
+    # the \bbank\b cash rule must not win over the more specific P&L / borrowings rules.
+    bals = [finstmt.LedgerBalance("Bank Charges", 1200.0, 0.0),
+            finstmt.LedgerBalance("Bank Overdraft", 0.0, 50000.0),
+            finstmt.LedgerBalance("HDFC Bank", 80000.0, 0.0)]
+    by = {m["ledger"].name: m for m in finstmt.map_to_schedule3(bals)}
+    assert by["Bank Charges"]["group"] == "Finance costs"
+    assert by["Bank Overdraft"]["group"] == "Short-term borrowings"
+    assert by["HDFC Bank"]["group"] == "Cash & cash equivalents"
+
+
+def test_finstmt_signed_contribution_handles_debit_reserve():
+    # an accumulated-loss reserve sits as a DEBIT balance — it must REDUCE equity (not inflate it),
+    # and the sheet must still tie. abs(net) bucketing would break this.
+    bals = [finstmt.LedgerBalance("Sales", 0.0, 100000.0),
+            finstmt.LedgerBalance("Purchases", 60000.0, 0.0),
+            finstmt.LedgerBalance("Cash at Bank", 80000.0, 0.0),
+            finstmt.LedgerBalance("Share Capital", 0.0, 50000.0),
+            finstmt.LedgerBalance("Accumulated Reserves", 10000.0, 0.0)]   # debit reserve = loss
+    st = finstmt.build_statements(finstmt.map_to_schedule3(bals))
+    assert st["bs"]["equity_liabilities"]["Reserves & surplus"] == -10000.0
+    assert st["bs"]["balanced"] is True
+
+
+def test_finstmt_plural_ledger_names_map_correctly():
+    names = ["Trade Payables", "Trade Receivables", "Investments", "Fixed Assets", "Debentures",
+             "Reserves & Surplus"]
+    by = {m["ledger"].name: m["group"]
+          for m in finstmt.map_to_schedule3([finstmt.LedgerBalance(n, 100.0, 0.0) for n in names])}
+    assert by["Trade Payables"] == "Trade payables"
+    assert by["Trade Receivables"] == "Trade receivables"
+    assert by["Investments"] == "Non-current investments"
+    assert by["Fixed Assets"] == "Property, plant & equipment"
+    assert by["Debentures"] == "Long-term borrowings"
+    assert by["Reserves & Surplus"] == "Reserves & surplus"
+
+
+def test_gst_empty_inputs_give_a_clear_error(tmp_path):
+    import termind.repl as r
+    s = r.Session(live=False)
+    s.store["workspace"] = str(tmp_path)
+    (tmp_path / "a.csv").write_text("GSTIN of Supplier,Invoice No,Taxable Value\n")  # header only
+    (tmp_path / "b.csv").write_text("GSTIN of Supplier,Invoice No,Taxable Value\n")
+    out = s.handle("/ca gst a.csv b.csv")
+    assert "no invoices" in out and "crash" not in out
 
 
 # ── REPL dispatch + web endpoints for every section ───────────────────────────────

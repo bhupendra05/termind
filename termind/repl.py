@@ -2279,6 +2279,9 @@ class Session:
             return {"error": f"⚠ {e}"}
         except Exception as e:
             return {"error": f"⚠ couldn't read the GST files: {e}"}
+        if not books and not portal:
+            return {"error": "no invoices parsed from either file — are these GSTR-2B / purchase "
+                             "register exports with GSTIN + Invoice columns?"}
         self.ledger.record(session=cid, tool="ca.gst.parse",
                            target=f"{os.path.basename(books_path)} + {os.path.basename(portal_path)}",
                            outcome="ok", consent=consent,

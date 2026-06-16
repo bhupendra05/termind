@@ -33,7 +33,7 @@ _PATTERNS = [
     (r"\bDRC[-\s]?01A?\b", "GST", "GST demand (DRC-01)", "DRC-01"),
     (r"\bGSTR[-\s]?3B\b.*\bGSTR[-\s]?1\b|\bGSTR[-\s]?1\b.*\bGSTR[-\s]?3B\b", "GST",
      "GSTR-1 vs GSTR-3B mismatch", "outward mismatch"),
-    (r"\b2A\b|\b2B\b|input tax credit|\bITC\b", "GST", "ITC mismatch (2B vs 3B)", "ITC mismatch"),
+    (r"gstr[-\s]?2a|gstr[-\s]?2b|input tax credit|\bITC\b", "GST", "ITC mismatch (2B vs 3B)", "ITC mismatch"),
     (r"\b143\s*\(\s*2\s*\)", "Income-Tax", "Scrutiny assessment u/s 143(2)", "143(2)"),
     (r"\b142\s*\(\s*1\s*\)", "Income-Tax", "Inquiry before assessment u/s 142(1)", "142(1)"),
     (r"\b143\s*\(\s*1\s*\)", "Income-Tax", "Intimation/adjustment u/s 143(1)", "143(1)"),
@@ -55,10 +55,10 @@ def classify_notice(text: str) -> Notice:
     t = text or ""
     law, kind, section = "Unknown", "Unidentified notice", ""
     for rx, lw, kd, sec in _PATTERNS:
-        if re.search(rx, t, re.I):
+        if re.search(rx, t, re.I | re.S):              # re.S: cross-line "GSTR-1 … GSTR-3B"
             law, kind, section = lw, kd, sec
             break
-    issues = [label for rx, label in _ISSUE_HINTS if re.search(rx, t, re.I)]
+    issues = [label for rx, label in _ISSUE_HINTS if re.search(rx, t, re.I | re.S)]
     amounts = []
     for m in _AMOUNT.finditer(t):
         try:

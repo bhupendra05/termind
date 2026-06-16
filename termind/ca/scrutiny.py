@@ -20,10 +20,13 @@ from datetime import datetime
 
 from .bank import Txn, parse_statement  # a ledger row has the same shape as a statement row
 
-# narrations that look personal turning up in a business ledger
+# narrations that look personal turning up in a business ledger. Kept deliberately specific —
+# a false "personal expense" flag is high-severity, so avoid broad words ('gold' → gold loan,
+# 'movie' → movie production, 'holiday' → holiday pay) that catch legitimate business items.
 _PERSONAL = re.compile(
-    r"\b(jewell?ery|gold|diwali gift|gift|personal|salon|spa|vacation|holiday|casino|lottery|"
-    r"movie|netflix|spotify|grocery|school fee|tuition|wedding|honeymoon)\b", re.I)
+    r"\b(jewell?ery|diwali gift|gift to|gift for|salon|spa|vacation|casino|lottery|netflix|"
+    r"spotify|grocer(y|ies)|school fees?|tuition fees?|wedding|honeymoon|drawings|personal use|"
+    r"personal expense)\b", re.I)
 
 
 @dataclass
@@ -52,11 +55,26 @@ def _duplicates(txns):
         key = (round(t.amount, 2), (t.narration or "").strip().lower())
         if key[0] > 0 and key[1]:
             groups.setdefault(key, []).append(t)
+
+    def _d(t):
+        try:
+            return datetime.strptime(t.date, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return None
+
     for (amt, _narr), grp in groups.items():
-        if len(grp) > 1:
-            for t in grp:
+        if len(grp) < 2:
+            continue
+        dated = [(t, _d(t)) for t in grp]
+        # identical amount+narration is only suspicious when close in time — entries a month
+        # apart are usually legitimate recurring postings (rent, salary, EMI), not double entries.
+        for t, dt in dated:
+            twin = any(o is not t and (od is None or dt is None or abs((dt - od).days) <= 7)
+                       for o, od in dated)
+            if twin:
                 yield Flag("medium", "possible duplicate", t.date, t.narration, amt,
-                           f"same amount + narration appears {len(grp)}× — check for a double entry")
+                           f"same amount + narration within ~a week ({len(grp)}× total) — "
+                           "check for a double entry")
 
 
 def _weekend(txns):

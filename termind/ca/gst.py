@@ -35,7 +35,7 @@ class Invoice:
 _ALIASES = {
     "gstin": ("gstin", "gstin of supplier", "supplier gstin", "gstin/uin", "gstin of supplier "),
     "invoice": ("invoice no", "invoice number", "inv no", "document number", "bill no",
-                "invoice no.", "voucher no"),
+                "invoice no.", "supplier invoice no"),
     "date": ("invoice date", "date", "document date", "bill date", "inv date"),
     "taxable": ("taxable value", "taxable amount", "taxable", "assessable value"),
     "igst": ("integrated tax", "igst", "integrated tax amount", "igst amount"),

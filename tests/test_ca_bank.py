@@ -75,6 +75,39 @@ def test_parse_statement_reads_csv_file(tmp_path):
     assert len(bank.parse_statement(str(p))) == 8
 
 
+SIGNED = """Date,Narration,Amount,Balance
+01/04/2025,UPI-OFFICE RENT,-25000,1175000
+04/04/2025,NEFT CR-CUSTOMER,150000,1325000
+"""
+TYPED = """Date,Narration,Amount,Dr/Cr,Balance
+01/04/2025,Cheque paid to vendor,5000,Dr,95000
+02/04/2025,Cash deposit,20000,Cr,115000
+"""
+
+
+def test_parse_single_signed_amount_column():
+    txns = bank.parse_csv(SIGNED)                        # one amount column, sign = direction
+    assert len(txns) == 2
+    assert txns[0].debit == 25000.0 and txns[0].credit == 0.0 and txns[0].direction == "out"
+    assert txns[1].credit == 150000.0 and txns[1].direction == "in"
+
+
+def test_parse_amount_with_drcr_indicator():
+    txns = bank.parse_csv(TYPED)                         # amount column + a Dr/Cr indicator column
+    assert txns[0].debit == 5000.0 and txns[0].credit == 0.0
+    assert txns[1].credit == 20000.0 and txns[1].debit == 0.0
+
+
+def test_single_amount_layout_flows_to_valid_tally():
+    cl = bank.classify(bank.parse_csv(SIGNED))
+    xml = bank.to_tally_xml(cl, bank_ledger="HDFC Bank")
+    dom = minidom.parseString(xml)                       # well-formed
+    assert len(dom.getElementsByTagName("VOUCHER")) == 2
+    # the signed-amount rows produce a Payment (rent out) and a Receipt (money in)
+    vtypes = {v.getAttribute("VCHTYPE") for v in dom.getElementsByTagName("VOUCHER")}
+    assert vtypes == {"Payment", "Receipt"}
+
+
 # ── classification ──────────────────────────────────────────────────────────────
 def test_rules_map_common_narrations():
     cl = bank.classify(bank.parse_csv(CSV))             # no brain — rules only
@@ -84,6 +117,11 @@ def test_rules_map_common_narrations():
     assert by_narr["UPI-OFFICE RENT-LANDLORD"].ledger == "Rent"
     assert by_narr["GST PAYMENT CGST"].ledger == "GST Paid"
     assert by_narr["BANK CHARGES SMS CHG"].ledger == "Bank Charges"
+
+
+def test_bank_charges_plural_is_not_suspense():
+    c = bank.classify([Txn("2025-04-06", "BANK CHARGES", debit=29.5)])[0]
+    assert c.ledger == "Bank Charges" and c.basis == "rule:bankcharge"
 
 
 def test_contra_for_cash_and_atm():

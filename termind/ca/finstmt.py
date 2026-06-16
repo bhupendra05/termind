@@ -36,37 +36,37 @@ _MAP = [
      "PL", "Other income"),
     (r"\b(purchases?|raw materials?|material consumed|cost of goods)\b", "PL", "Purchases of stock-in-trade"),
     (r"\b(opening stock|closing stock|changes in inventor)\b", "PL", "Changes in inventories"),
-    (r"\b(salary|salaries|wages|bonus|staff|employee|pf|esi|gratuity|director.?s? remuneration)\b",
+    (r"\b(salary|salaries|wages|bonus(es)?|staff|employees?|pf|esi|gratuity|director.?s? remuneration)\b",
      "PL", "Employee benefit expense"),
-    (r"\b(interest (on|paid|expense)|finance cost|bank charge|loan processing)\b", "PL", "Finance costs"),
+    (r"\b(interest (on|paid|expenses?)|finance costs?|bank charges?|loan processing)\b", "PL", "Finance costs"),
     (r"\b(depreciation|amortis|amortiz)\b", "PL", "Depreciation & amortisation"),
-    (r"\b(rent|electricity|power|telephone|internet|repairs?|insurance|audit fee|legal|professional|"
-     r"printing|stationery|travel|conveyance|postage|courier|office|misc|sundry expense|fuel|freight|"
-     r"advertis|commission paid|donation|rates? and taxes|software|subscription)\b",
+    (r"\b(rent|electricity|power|telephone|internet|repairs?|insurance|audit fees?|legal|professional|"
+     r"printing|stationery|travel|conveyance|postage|courier|office|misc|sundry expenses?|fuel|freight|"
+     r"advertis|commission paid|donations?|rates? and taxes|software|subscriptions?)\b",
      "PL", "Other expenses"),
     # ── Balance Sheet: Equity & Liabilities ───────────────────────────────────
     (r"\b(share capital|equity|capital account|partner.?s? capital|proprietor)\b", "BS", "Share capital / Capital"),
-    (r"\b(reserve|surplus|retained earning|general reserve|securities premium|p&l account)\b",
+    (r"\b(reserves?|surplus|retained earnings?|general reserves?|securities premium|p&l account)\b",
      "BS", "Reserves & surplus"),
-    (r"\b(long[-\s]?term borrow|term loan|debenture|secured loan|unsecured loan|loan from)\b",
+    (r"\b(long[-\s]?term borrow|term loans?|debentures?|secured loans?|unsecured loans?|loan from)\b",
      "BS", "Long-term borrowings"),
     (r"\b(deferred tax liab)\b", "BS", "Deferred tax liabilities"),
-    (r"\b(cash credit|bank overdraft|working capital loan|short[-\s]?term borrow)\b", "BS", "Short-term borrowings"),
-    (r"\b(sundry creditor|trade payable|creditors|payable to|bills payable)\b", "BS", "Trade payables"),
+    (r"\b(cash credit|bank overdrafts?|working capital loans?|short[-\s]?term borrow)\b", "BS", "Short-term borrowings"),
+    (r"\b(sundry creditors?|trade payables?|creditors|payable to|bills payables?)\b", "BS", "Trade payables"),
     (r"\b(duties? and taxes|gst payable|tds payable|tcs payable|outstanding|expenses payable|"
      r"statutory|advance from customer|other liab)\b", "BS", "Other current liabilities"),
-    (r"\b(provision for tax|provision for|short[-\s]?term provision)\b", "BS", "Short-term provisions"),
+    (r"\b(provision for tax|provisions? for|short[-\s]?term provisions?)\b", "BS", "Short-term provisions"),
     # ── Balance Sheet: Assets ─────────────────────────────────────────────────
-    (r"\b(fixed asset|plant|machinery|building|premises|furniture|fixture|vehicle|car\b|computer|"
-     r"land|equipment|goodwill|intangible|office equipment)\b", "BS", "Property, plant & equipment"),
-    (r"\b(investment|shares in|mutual fund)\b", "BS", "Non-current investments"),
+    (r"\b(fixed assets?|plant|machinery|buildings?|premises|furniture|fixtures?|vehicles?|car\b|computers?|"
+     r"land|equipments?|goodwill|intangibles?|office equipment)\b", "BS", "Property, plant & equipment"),
+    (r"\b(investments?|shares in|mutual funds?)\b", "BS", "Non-current investments"),
     (r"\b(inventor|stock[-\s]?in[-\s]?trade|closing stock|raw material stock|finished goods)\b",
      "BS", "Inventories"),
-    (r"\b(sundry debtor|trade receivable|debtors|receivable from|bills receivable)\b", "BS", "Trade receivables"),
-    (r"\b(cash in hand|cash at bank|\bbank\b|cash\b|fixed deposit|\bfdr?\b|petty cash)\b",
+    (r"\b(sundry debtors?|trade receivables?|debtors|receivable from|bills receivables?)\b", "BS", "Trade receivables"),
+    (r"\b(cash in hand|cash at bank|\bbank\b|cash\b|fixed deposits?|\bfdr?\b|petty cash)\b",
      "BS", "Cash & cash equivalents"),
-    (r"\b(loans? and advances?|advance to|deposit|prepaid|tds receivable|gst (input|receivable)|"
-     r"input tax credit|security deposit)\b", "BS", "Short-term loans & advances"),
+    (r"\b(loans? and advances?|advances? to|deposits?|prepaid|tds receivable|gst (input|receivable)|"
+     r"input tax credit|security deposits?)\b", "BS", "Short-term loans & advances"),
 ]
 _COMPILED = [(re.compile(rx, re.I), st, grp) for (rx, st, grp) in _MAP]
 
@@ -172,22 +172,28 @@ def _map_llm(balances, mapped, idx, brain):
 
 
 def build_statements(mapped: list) -> dict:
-    """Aggregate mapped ledgers into a Balance Sheet + P&L with Schedule III subtotals."""
-    def bucket(groups, statement):
+    """Aggregate mapped ledgers into a Balance Sheet + P&L with Schedule III subtotals.
+
+    Contributions are SIGNED by each group's natural side (credit-side groups — liabilities,
+    equity, income — take -net; debit-side groups — assets, expenses — take +net) rather than
+    abs(net). That way an abnormal balance (e.g. a debit-balance reserve from accumulated losses)
+    correctly REDUCES its group instead of inflating it, and the sheet still ties."""
+    def bucket(groups, statement, credit_side):
         out = {g: 0.0 for g in groups}
         for m in mapped:
             if m["statement"] == statement and m["group"] in out:
-                out[m["group"]] += abs(m["ledger"].net)
-        return {g: round(v, 2) for g, v in out.items() if v}
+                net = m["ledger"].net
+                out[m["group"]] += (-net if credit_side else net)
+        return {g: round(v, 2) for g, v in out.items() if round(v, 2)}
 
-    income = bucket(_PL_INCOME, "PL")
-    expense = bucket(_PL_EXPENSE, "PL")
+    income = bucket(_PL_INCOME, "PL", credit_side=True)
+    expense = bucket(_PL_EXPENSE, "PL", credit_side=False)
     total_income = round(sum(income.values()), 2)
     total_expense = round(sum(expense.values()), 2)
     pbt = round(total_income - total_expense, 2)
 
-    liabs = bucket(_BS_LIABS, "BS")
-    assets = bucket(_BS_ASSETS, "BS")
+    liabs = bucket(_BS_LIABS, "BS", credit_side=True)
+    assets = bucket(_BS_ASSETS, "BS", credit_side=False)
     liabs["Profit & loss (current year)"] = pbt        # carry P&L into reserves so it balances
     total_liabs = round(sum(liabs.values()), 2)
     total_assets = round(sum(assets.values()), 2)

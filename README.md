@@ -31,7 +31,7 @@ and binds to **localhost only** — nothing leaves your machine.
 
 ```
   ▀█▀ █▀▀ █▀█ █▀▄▀█ █ █▄░█ █▀▄
-  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v2.6.0 · local agent · on AION
+  ░█░ ██▄ █▀▄ █░▀░█ █ █░▀█ █▄▀   v2.6.1 · local agent · on AION
 
 ┌─ FEATURES ─────────────────────────────────────────────────┐
 │  just type        chat with your local model (gemma3)
@@ -73,7 +73,7 @@ termind ❯ /db delete users who never logged in
 
 ## Tests
 ```bash
-.venv/bin/python -m pytest -q     # 207 tests
+.venv/bin/python -m pytest -q     # 216 tests
 ```
 The suite covers retrieval with source cites, the code agent's act-observe loop, the AION
 sandbox guarantee (a rogue agent's `fs.write` is denied by the kernel), the audit ledger's
