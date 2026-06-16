@@ -231,6 +231,16 @@ class _Handler(BaseHTTPRequestHandler):
             out = self.session.set_tier(str(req.get("tier", "")))
             return self._send(200, json.dumps({"reply": out,
                                                "tier": self.session.store.get("tier", "smart")}))
+        if self.path == "/api/ca":
+            s = self.session
+            with s._lock:
+                if str(req.get("op", "")) == "bank":
+                    out = s.ca_bank_api(path=(req.get("path") or None),
+                                        filename=(req.get("filename") or None),
+                                        content=req.get("content"))
+                else:
+                    out = {"ok": False, "error": "unknown CA section"}
+            return self._send(200, json.dumps(out))
         return self._send(404, json.dumps({"error": "not found"}))
 
 
@@ -604,6 +614,7 @@ animation:confl .9s ease-out forwards;z-index:60}
     <button class=snavi data-s=memory>🧠 Memory</button>
     <button class=snavi data-s=tools>🧰 Toolchains</button>
     <button class=snavi data-s=data>🗄 Databases</button>
+    <button class=snavi data-s=ca>🧮 CA workbench</button>
     <button class=snavi data-s=security>🛡 Security</button>
     <button class=snavi data-s=audit>🔒 Audit</button>
     <button class=snavi data-s=help>📖 Help</button>
@@ -659,6 +670,23 @@ animation:confl .9s ease-out forwards;z-index:60}
       <button class=mbtn id=sdbrun>run</button>
     </div>
     <pre id=sdbout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--card);border-radius:8px;padding:10px;margin-top:8px;max-height:240px;overflow:auto"></pre>
+  </section>
+  <section class=spane data-s=ca>
+    <h2>CA workbench</h2>
+    <div class=sub>built for chartered accountants who can't put client data in cloud tools. Every step runs on THIS machine with the local model, and each parse + export is sealed into the audit ledger — your DPDP "data never left the device" proof. Section 1 of the roadmap is live; scrutiny, GST, notices and financial statements follow.</div>
+    <div class=catab style="font-weight:600;margin:12px 0 6px">📒 Bank statement → Tally</div>
+    <div class=sub>upload a bank statement (CSV / Excel / PDF) or name one in your workspace. termind classifies every line to a ledger head + voucher (rules first, the local model for the rest) and writes ready-to-import Tally vouchers.</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">
+      <input type=file id=cafile accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf" class=sin style="flex:1;padding:7px">
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <input id=capath class=sin style="flex:1" placeholder="…or a file already in your workspace, e.g. hdfc_apr.csv">
+      <button class=mbtn id=carun style="background:var(--clay);color:#fff;border:0">→ convert to Tally</button>
+    </div>
+    <div id=cabadge style="margin:10px 0"></div>
+    <div id=caledgers></div>
+    <div id=cadl style="display:flex;gap:8px;margin-top:10px"></div>
+    <pre id=caout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);margin-top:8px;background:var(--card);border-radius:8px;padding:10px;max-height:220px;overflow:auto"></pre>
   </section>
   <section class=spane data-s=security>
     <h2>Security</h2>
@@ -941,6 +969,7 @@ document.querySelectorAll('.snavi').forEach(b=>b.onclick=()=>{
  if(b.dataset.s=='tools')loadTools();
  if(b.dataset.s=='audit')loadAudit();
  if(b.dataset.s=='data')loadDb();
+ if(b.dataset.s=='ca')loadCa();
  if(b.dataset.s=='security')loadSec();
  if(b.dataset.s=='about')document.getElementById('sabout').textContent='version '+ver.textContent;});
 async function loadTools(refresh){const d=await (refresh
@@ -972,6 +1001,38 @@ document.getElementById('sdbrun').onclick=async()=>{const t=document.getElementB
   ['confirm','cancel'].forEach(a=>{const b=document.createElement('button');b.className='qchip';b.textContent=a;
    b.onclick=async()=>{const rr=await dbApi('confirm',{answer:a});out.textContent=r.reply+'\n\n'+rr.reply;loadDb()};c.appendChild(b)});
   out.parentNode.insertBefore(c,out.nextSibling)}}
+function loadCa(){document.getElementById('caout').textContent='';
+ document.getElementById('cabadge').innerHTML='';document.getElementById('caledgers').innerHTML='';
+ document.getElementById('cadl').innerHTML=''}
+function caDownload(name,content,mime){const b=new Blob([content],{type:mime});
+ const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;
+ document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(u)}
+function caRender(d){const badge=document.getElementById('cabadge');
+ if(!d.ok){badge.innerHTML='<span class=abadge style="background:#a3262d">⚠ '+(d.error||'failed')+'</span>';return}
+ const s=d.summary;
+ badge.innerHTML='<span class=abadge style="background:var(--ok,#1f7a4d)">✓ '+s.transactions+' VOUCHERS</span>'+
+  '<span class=ameta>in ₹'+s.total_in.toLocaleString('en-IN')+' · out ₹'+s.total_out.toLocaleString('en-IN')+
+  ' · '+s.auto_classified+' by rules'+(s.by_model?' · '+s.by_model+' by local model':'')+' · '+s.needs_review+' to review</span>';
+ const box=document.getElementById('caledgers');box.innerHTML='';
+ (d.ledgers||[]).slice(0,8).forEach(l=>{const r=document.createElement('div');r.className='trow';
+  r.innerHTML='<span class=tl></span><span class=tv></span><span class=tp style="text-align:right"></span>';
+  r.querySelector('.tl').textContent=l.head;r.querySelector('.tv').textContent=l.count+' txn';
+  r.querySelector('.tp').textContent='₹'+Number(l.amount).toLocaleString('en-IN');box.appendChild(r)});
+ const dl=document.getElementById('cadl');dl.innerHTML='';
+ const bx=document.createElement('button');bx.className='mbtn';bx.style.cssText='background:var(--clay);color:#fff;border:0';
+ bx.textContent='⬇ '+d.xml;bx.onclick=()=>caDownload(d.xml,d.xml_content,'application/xml');dl.appendChild(bx);
+ const bc=document.createElement('button');bc.className='mbtn';bc.textContent='⬇ '+d.csv;
+ bc.onclick=()=>caDownload(d.csv,d.csv_content,'text/csv');dl.appendChild(bc);
+ document.getElementById('caout').textContent=d.report||''}
+async function caApi(body){return (await (await fetch('/api/ca',{method:'POST',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({op:'bank'},body))})).json())}
+document.getElementById('carun').onclick=async()=>{
+ const out=document.getElementById('caout');out.textContent='working — locally, nothing leaves this machine…';
+ const f=document.getElementById('cafile').files[0];
+ if(f){const txt=await f.text();caRender(await caApi({filename:f.name,content:txt}));return}
+ const p=document.getElementById('capath').value.trim();
+ if(!p){out.textContent='choose a statement file, or type a path in your workspace.';return}
+ caRender(await caApi({path:p}))};
 async function loadSec(){const d=await (await fetch('/api/scan')).json();renderSec(d)}
 function renderSec(d){const s=d.summary,ok=s.clean;
  document.getElementById('ssecbadge').innerHTML='<span class=abadge style="background:'+(ok?'var(--ok,#1f7a4d)':'#a3262d')+'">'+(ok?'✓ CLEAN':'⚠ '+s.total+' ISSUE(S)')+'</span><span class=ameta>'+s.high+' high · '+s.medium+' medium · '+s.low+' low · '+(d.workspace||'')+'</span>';

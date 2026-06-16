@@ -636,3 +636,33 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. A termind browser window showing a Claude-style chat. At the very bottom, just above the input bar, a horizontal context strip with pill chips: "📂 ~/my-app" · "🗄 app (sqlite)" · "▶ act" · "⊕ gemma3" · "max" (the last chip glowing clay/violet). A bot reply in the chat reads: "No database is connected. Open Settings → 🗄 Databases, add your DB, then come back." Below the window, three labeled cards: a "Master Prompt" card listing bullet rules (GATHER UPFRONT, DATABASE GATE, TOOLCHAIN GATE); a "Tier: max" card showing "frontier model auto-selected · every call logged"; a "Bottom Bar" card with the same pill row. Top headline in bold charcoal: **"Knows what it can do. Shows you where it is. Routes to the right model."** Subtitle: "termind v2.1 · master prompt · bottom context bar · smart / smarter / max tiers · 164 tests." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v2.2 — CA workbench (bank statement → Tally, on-device)
+
+### 📣 Post
+
+> **There's one profession that legally *cannot* use ChatGPT on its real work: the chartered accountant. So I built them their own tab — and it never touches the internet.**
+>
+> A CA holds the most confidential data there is: client PAN, bank statements, ledgers, ITRs. ICAI's Code of Ethics makes confidentiality a duty, and India's DPDP Act 2023 makes the firm a *Data Fiduciary* — critical personal data must stay in the country, with penalties up to ₹250 crore. Yet every mainstream "AI for CAs" tool is cloud-first. The data leaves the machine. So a CA's real choice today is: do it by hand, or take on the liability.
+>
+> **termind v2.2 adds a CA workbench that runs the whole job on the CA's own laptop.**
+>
+> 📒 **Bank statement → Tally, the #1 monthly grind.** `/ca bank statement.csv` (or .xlsx / .pdf) parses every line, classifies it to a ledger head + voucher type — deterministic rules first, the **local model** only for the leftovers — and writes ready-to-import **Tally XML vouchers** with the debit/credit signs correct. Hours of re-keying → one command. The bank data never leaves the device.
+>
+> 🔒 **The audit ledger becomes a compliance artifact.** Every parse and export is sealed into termind's existing tamper-evident ledger. For a CA, that's not a nicety — it's the proof you hand a client or a regulator that the data *never left this machine*.
+>
+> This is section one. The roadmap — ledger scrutiny, GST reconciliation, notice-reply drafting, Schedule III financials — all reuses the same local engine.
+>
+> Built on the thing nobody else is offering: a local agent that's *far from the internet*. 185 tests.
+>
+> Local-first · private · $0 by default.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #CharteredAccountant #DPDP #Tally #Fintech #AITrust #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Centre: a termind window with a "🧮 CA workbench" tab active and a "📒 Bank statement → Tally" section. Left, a small bank-statement card with rows: "UPI-OFFICE RENT … 25,000", "GST PAYMENT CGST … 18,000", "NEFT CR-ACME INVOICE … 1,50,000". A bold violet arrow labelled "on-device · local model" points right to a "Tally vouchers" card showing ledger heads — "Rent (Payment)", "GST Paid (Payment)", "Sales (Receipt)" — with a green "✓ ready to import" seal. A thin audit-ledger strip along the bottom reads "ca.bank.parse · ca.bank.export · ✓ verified · 0 bytes off-machine". A small red-outline "cloud" icon in the corner is crossed out, tagged "DPDP-safe". Top headline in bold charcoal: **"The one tool a CA can use on real client data."** Subtitle: "termind v2.2 · bank statement → Tally vouchers · entirely on your machine · ICAI + DPDP-safe · 185 tests." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

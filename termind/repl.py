@@ -38,6 +38,7 @@ from . import toolchain as tcmod
 from . import db as dbmod
 from . import scan as scanmod
 from . import lifecycle as lcmod
+from .ca import bank as cabank
 from .ledger import Ledger
 from .store import load as store_load, save as store_save
 
@@ -150,6 +151,7 @@ FEATURES = f"""{CY}╔═⟨ {WH}{B}SYSTEM CAPABILITIES{N}{CY} ⟩════�
 {CY}║{N}  {GR}◉{N} {WH}/ledger{N}          {D}»{N} tamper-evident log of every agent action · export
 {CY}║{N}  {GR}◉{N} {WH}/db <nl|sql>{N}     {D}»{N} query your DB · verifies + previews before destructive ops
 {CY}║{N}  {GR}◉{N} {WH}/scan{N}            {D}»{N} sweep the folder for secrets · risky scripts · bad deps
+{CY}║{N}  {GR}◉{N} {WH}/ca <section>{N}    {D}»{N} CA workbench · /ca bank <statement> → Tally vouchers (local)
 {CY}║{N}  {GR}◉{N} {WH}/termind{N}         {D}»{N} isolated workspace · uninstall plan   {GR}◉{N} {WH}/tier{N} {D}» smart/smarter/max{N}
 {CY}║{N}  {GR}◉{N} {WH}/help{N}  {D}» this panel{N}      {GR}◉{N} {WH}/exit{N}  {D}» jack out{N}
 {CY}╚════════════════════════════════════════════════════════════════╝{N}
@@ -162,6 +164,13 @@ BOOT = [
     ("credit governor", "enforcing"),
     ("semantic memory", "mounted"),
 ]
+
+CA_HELP = (
+    "CA workbench — runs entirely on your machine, so client data never leaves it.\n"
+    "  /ca bank <statement.csv|.xlsx|.pdf>   parse → classify each line → Tally XML + ledger CSV\n"
+    "coming in later versions: /ca scrutiny · /ca gst · /ca notice · /ca fs\n"
+    "every parse and export is sealed into the audit ledger (/ledger) — your DPDP 'data never "
+    "left' proof.")
 
 
 def _boot(live: bool, server: bool) -> None:
@@ -2045,6 +2054,126 @@ class Session:
         self.scan_workspace()
         return self._scan_report()
 
+    # ── v2.2: CA workbench (local, audited) ──────────────────────────────────
+    def do_ca(self, line: str) -> str:
+        """CA workbench dispatcher. v2.2: /ca bank <statement> → Tally vouchers + ledger CSV."""
+        arg = (line or "").strip()
+        if not arg or arg in ("help", "?"):
+            return CA_HELP
+        parts = arg.split(None, 1)
+        sub, rest = parts[0].lower(), (parts[1].strip() if len(parts) > 1 else "")
+        if sub == "bank":
+            return self.do_ca_bank(rest)
+        if sub in ("scrutiny", "gst", "notice", "fs", "finstmt"):
+            return (f"the '{sub}' section is on the roadmap but not built yet — "
+                    "available now: /ca bank <statement>")
+        return f"unknown CA section '{sub}'.\n{CA_HELP}"
+
+    def _ca_in_path(self, arg: str) -> str:
+        """Resolve a statement path: as given, or relative to the workspace, or to cwd."""
+        a = os.path.expanduser(arg.strip().strip('"').strip("'"))
+        for cand in (a, os.path.join(self.workspace(), a), os.path.join(os.getcwd(), a)):
+            if os.path.isfile(cand):
+                return os.path.abspath(cand)
+        return os.path.abspath(a)
+
+    def do_ca_bank(self, arg: str) -> str:
+        """Terminal entry: /ca bank <statement> → Tally XML + ledger CSV, with a text report."""
+        if not arg:
+            return ("usage: /ca bank <statement.csv|.xlsx|.pdf>\n"
+                    "parses the statement, suggests a ledger head + voucher for each line "
+                    "(rules first, the local model for the rest), and writes Tally import XML "
+                    "+ a review CSV into your workspace. Nothing leaves the machine.")
+        res = self._ca_bank_run(self._ca_in_path(arg), consent=f"/ca bank {arg}")
+        if res.get("error"):
+            return res["error"]
+        return self._ca_bank_report(res["summary"], res["xml_path"], res["csv_path"])
+
+    def _ca_bank_run(self, path: str, consent: str = "") -> dict:
+        """The engine shared by terminal + web: parse → classify (local) → export, all audited.
+        Returns {summary, xml_path, csv_path} or {error}."""
+        if not os.path.isfile(path):
+            return {"error": f"no such statement: {path}  (give a path to a .csv / .xlsx / .pdf)"}
+        cid = self.store.get("active_chat") or "default"
+        try:
+            txns = cabank.parse_statement(path)
+        except cabank.StatementError as e:
+            return {"error": f"⚠ {e}"}
+        except Exception as e:                       # never crash on a malformed file
+            return {"error": f"⚠ couldn't read that statement: {e}"}
+        if not txns:
+            return {"error": "parsed it, but found no transactions — is it a bank-statement export?"}
+        self.ledger.record(session=cid, tool="ca.bank.parse", target=os.path.basename(path),
+                           outcome="ok", consent=consent, detail=f"{len(txns)} transactions")
+        brain = None
+        if self.live:
+            brain = lambda msgs: self._chat(msgs, fmt_json=True)  # local model, leftovers only
+        with Thinking(f"classifying {len(txns)} transactions"):
+            classified = cabank.classify(txns, brain=brain)
+        s = cabank.summary(classified)
+        base = re.sub(r"[^\w.-]", "_", os.path.splitext(os.path.basename(path))[0]) or "statement"
+        name = (self.profile() or {}).get("name", "") or ""
+        xml = cabank.to_tally_xml(classified, company=name, bank_ledger="Bank")
+        csv_out = cabank.to_csv(classified)
+        xml_path = self._ca_write(f"{base}_tally.xml", xml)
+        csv_path = self._ca_write(f"{base}_ledger.csv", csv_out)
+        self.ledger.record(session=cid, tool="ca.bank.export", target=xml_path, outcome="ok",
+                           consent=consent, bytes_written=len(xml.encode()),
+                           detail=f"{s['transactions']} vouchers")
+        self.actions += 1
+        return {"summary": s, "xml_path": xml_path, "csv_path": csv_path,
+                "xml_text": xml, "csv_text": csv_out}
+
+    def ca_bank_api(self, path: str = None, filename: str = None, content: str = None) -> dict:
+        """Web entry: accept a workspace path OR an uploaded file's text, run the engine, and
+        return structured results the CA panel can render. Uploads land in the workspace."""
+        if content is not None and filename:
+            safe = re.sub(r"[^\w.-]", "_", os.path.basename(filename)) or "statement.csv"
+            path = os.path.join(self.workspace(), safe)
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self.manifest.record("ca-import", path, safe)
+            except OSError as e:
+                return {"ok": False, "error": f"couldn't save the upload: {e}"}
+        elif path:
+            path = self._ca_in_path(path)
+        else:
+            return {"ok": False, "error": "give a statement path, or upload a file"}
+        res = self._ca_bank_run(path, consent=f"web: /ca bank {os.path.basename(path)}")
+        if res.get("error"):
+            return {"ok": False, "error": res["error"]}
+        s = res["summary"]
+        return {"ok": True, "summary": s,
+                "ledgers": [{"head": h, **v} for h, v in s["ledgers"].items()],
+                "xml": os.path.basename(res["xml_path"]),
+                "csv": os.path.basename(res["csv_path"]),
+                "xml_content": res["xml_text"], "csv_content": res["csv_text"],
+                "workspace": self.workspace(),
+                "report": self._ca_bank_report(s, res["xml_path"], res["csv_path"])}
+
+    def _ca_write(self, name: str, content: str) -> str:
+        out = os.path.join(self.workspace(), name)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(content)
+        self.manifest.record("ca-export", out, name)
+        return out
+
+    def _ca_bank_report(self, s: dict, xml_path: str, csv_path: str) -> str:
+        top = list(s["ledgers"].items())[:6]
+        rows = "\n".join(f"  {head[:30]:<30} {v['count']:>3} txn   ₹{v['amount']:,.2f}"
+                         for head, v in top)
+        model_note = f" · {s['by_model']} by the local model" if s["by_model"] else ""
+        return (f"📒 bank statement → ledger  ·  {s['transactions']} transactions\n"
+                f"   in ₹{s['total_in']:,.2f}   ·   out ₹{s['total_out']:,.2f}\n"
+                f"   {s['auto_classified']} auto-classified by rules{model_note} · "
+                f"{s['needs_review']} need a quick review\n"
+                f"top ledgers:\n{rows}\n"
+                f"→ Tally import XML : {xml_path}\n"
+                f"→ review CSV       : {csv_path}\n"
+                "import in Tally: Gateway → Import → Vouchers. Check the Suspense lines first. "
+                "(parse + export are in /ledger — proof the data never left this machine.)")
+
     # ── v2.0: workspace lifecycle / clean uninstall ──────────────────────────
     def do_termind(self, line: str) -> str:
         arg = line.replace("/termind", "", 1).strip()
@@ -2155,6 +2284,8 @@ class Session:
             return self.do_db(line)
         if line.startswith("/scan"):
             return self.do_scan()
+        if line.startswith("/ca"):
+            return self.do_ca(line[3:].strip())
         if line.startswith("/termind"):
             return self.do_termind(line)
         if line.startswith("/tier"):
