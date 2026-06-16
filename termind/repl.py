@@ -38,7 +38,8 @@ from . import toolchain as tcmod
 from . import db as dbmod
 from . import scan as scanmod
 from . import lifecycle as lcmod
-from .ca import bank as cabank
+from .ca import (bank as cabank, scrutiny as cascrutiny, gst as cagst,
+                 notice as canotice, finstmt as cafinstmt)
 from .ledger import Ledger
 from .store import load as store_load, save as store_save
 
@@ -167,10 +168,13 @@ BOOT = [
 
 CA_HELP = (
     "CA workbench — runs entirely on your machine, so client data never leaves it.\n"
-    "  /ca bank <statement.csv|.xlsx|.pdf>   parse → classify each line → Tally XML + ledger CSV\n"
-    "coming in later versions: /ca scrutiny · /ca gst · /ca notice · /ca fs\n"
-    "every parse and export is sealed into the audit ledger (/ledger) — your DPDP 'data never "
-    "left' proof.")
+    "  /ca bank <statement>            parse → classify each line → Tally XML + ledger CSV\n"
+    "  /ca scrutiny <ledger>           anomaly pass: round/duplicate/weekend/spike/personal\n"
+    "  /ca gst <register> <gstr-2b>    reconcile books vs 2B → ITC-at-risk + mismatch buckets\n"
+    "  /ca notice <notice.pdf|.txt>    identify the notice → draft a point-wise reply\n"
+    "  /ca fs <trial-balance>          Schedule III Balance Sheet + P&L\n"
+    "files can be .csv / .xlsx / .pdf. Every parse and export is sealed into the audit ledger "
+    "(/ledger) — your DPDP 'data never left the device' proof.")
 
 
 def _boot(live: bool, server: bool) -> None:
@@ -2064,10 +2068,21 @@ class Session:
         sub, rest = parts[0].lower(), (parts[1].strip() if len(parts) > 1 else "")
         if sub == "bank":
             return self.do_ca_bank(rest)
-        if sub in ("scrutiny", "gst", "notice", "fs", "finstmt"):
-            return (f"the '{sub}' section is on the roadmap but not built yet — "
-                    "available now: /ca bank <statement>")
+        if sub == "scrutiny":
+            return self.do_ca_scrutiny(rest)
+        if sub == "gst":
+            return self.do_ca_gst(rest)
+        if sub == "notice":
+            return self.do_ca_notice(rest)
+        if sub in ("fs", "finstmt", "financials"):
+            return self.do_ca_fs(rest)
         return f"unknown CA section '{sub}'.\n{CA_HELP}"
+
+    def _ca_brain(self, fmt_json: bool = True):
+        """The local model as a classify/draft brain — None when offline so callers fall back."""
+        if not self.live:
+            return None
+        return lambda msgs: self._chat(msgs, fmt_json=fmt_json)
 
     def _ca_in_path(self, arg: str) -> str:
         """Resolve a statement path: as given, or relative to the workspace, or to cwd."""
@@ -2124,22 +2139,29 @@ class Session:
         return {"summary": s, "xml_path": xml_path, "csv_path": csv_path,
                 "xml_text": xml, "csv_text": csv_out}
 
+    def _ca_save_upload(self, path: str = None, filename: str = None, content: str = None):
+        """Resolve a CA input: save an uploaded file's text into the workspace, or resolve a path.
+        Returns an absolute path, or an {ok:False,error} dict the API can return as-is."""
+        if content is not None and filename:
+            safe = re.sub(r"[^\w.-]", "_", os.path.basename(filename)) or "upload.csv"
+            dest = os.path.join(self.workspace(), safe)
+            try:
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self.manifest.record("ca-import", dest, safe)
+            except OSError as e:
+                return {"ok": False, "error": f"couldn't save the upload: {e}"}
+            return dest
+        if path:
+            return self._ca_in_path(path)
+        return {"ok": False, "error": "give a file path, or upload a file"}
+
     def ca_bank_api(self, path: str = None, filename: str = None, content: str = None) -> dict:
         """Web entry: accept a workspace path OR an uploaded file's text, run the engine, and
         return structured results the CA panel can render. Uploads land in the workspace."""
-        if content is not None and filename:
-            safe = re.sub(r"[^\w.-]", "_", os.path.basename(filename)) or "statement.csv"
-            path = os.path.join(self.workspace(), safe)
-            try:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                self.manifest.record("ca-import", path, safe)
-            except OSError as e:
-                return {"ok": False, "error": f"couldn't save the upload: {e}"}
-        elif path:
-            path = self._ca_in_path(path)
-        else:
-            return {"ok": False, "error": "give a statement path, or upload a file"}
+        path = self._ca_save_upload(path, filename, content)
+        if isinstance(path, dict):
+            return path
         res = self._ca_bank_run(path, consent=f"web: /ca bank {os.path.basename(path)}")
         if res.get("error"):
             return {"ok": False, "error": res["error"]}
@@ -2173,6 +2195,238 @@ class Session:
                 f"→ review CSV       : {csv_path}\n"
                 "import in Tally: Gateway → Import → Vouchers. Check the Suspense lines first. "
                 "(parse + export are in /ledger — proof the data never left this machine.)")
+
+    # ── v2.3: ledger scrutiny ────────────────────────────────────────────────
+    def do_ca_scrutiny(self, arg: str) -> str:
+        if not arg:
+            return "usage: /ca scrutiny <ledger.csv|.xlsx|.pdf>  — anomaly pass over a ledger"
+        res = self._ca_scrutiny_run(self._ca_in_path(arg), consent=f"/ca scrutiny {arg}")
+        return res["error"] if res.get("error") else self._ca_scrutiny_report(res)
+
+    def _ca_scrutiny_run(self, path: str, consent: str = "") -> dict:
+        if not os.path.isfile(path):
+            return {"error": f"no such ledger: {path}  (give a .csv / .xlsx / .pdf)"}
+        cid = self.store.get("active_chat") or "default"
+        try:
+            txns = cabank.parse_statement(path)
+        except cabank.StatementError as e:
+            return {"error": f"⚠ {e}"}
+        except Exception as e:
+            return {"error": f"⚠ couldn't read that ledger: {e}"}
+        if not txns:
+            return {"error": "no transactions found — is this a ledger export?"}
+        self.ledger.record(session=cid, tool="ca.scrutiny.parse", target=os.path.basename(path),
+                           outcome="ok", consent=consent, detail=f"{len(txns)} entries")
+        with Thinking(f"scrutinizing {len(txns)} entries"):
+            flags = cascrutiny.scrutinize(txns)
+            s = cascrutiny.summary(flags, txns)
+            note = cascrutiny.narrative(flags, s, brain=self._ca_brain(fmt_json=False))
+        base = re.sub(r"[^\w.-]", "_", os.path.splitext(os.path.basename(path))[0]) or "ledger"
+        csv_text = cascrutiny.to_csv(flags)
+        csv_path = self._ca_write(f"{base}_scrutiny.csv", csv_text)
+        self.ledger.record(session=cid, tool="ca.scrutiny.report", target=csv_path, outcome="ok",
+                           consent=consent, bytes_written=len(csv_text.encode()),
+                           detail=f"{s['flags']} flags")
+        self.actions += 1
+        return {"summary": s, "flags": flags, "narrative": note,
+                "csv_path": csv_path, "csv_text": csv_text}
+
+    def _ca_scrutiny_report(self, res: dict) -> str:
+        s, flags = res["summary"], res["flags"]
+        if s["clean"]:
+            return (f"🔍 ledger scrutiny — {s['transactions']} entries, no anomalies flagged.\n"
+                    f"{res['narrative']}\n→ {res['csv_path']}")
+        rows = "\n".join(f"  [{f.severity}] {f.kind} — {f.date} {f.narration[:32]} ₹{f.amount:,.0f}"
+                         for f in flags[:10])
+        more = f"\n  …and {s['flags'] - 10} more" if s["flags"] > 10 else ""
+        return (f"🔍 ledger scrutiny — {s['transactions']} entries · {s['flags']} flag(s) "
+                f"({s['high']} high · {s['medium']} medium · {s['low']} low)\n{rows}{more}\n"
+                f"opinion: {res['narrative']}\n→ {res['csv_path']}")
+
+    def ca_scrutiny_api(self, path=None, filename=None, content=None) -> dict:
+        p = self._ca_save_upload(path, filename, content)
+        if isinstance(p, dict):
+            return p
+        res = self._ca_scrutiny_run(p, consent=f"web: /ca scrutiny {os.path.basename(p)}")
+        if res.get("error"):
+            return {"ok": False, "error": res["error"]}
+        s = res["summary"]
+        return {"ok": True, "summary": s, "narrative": res["narrative"],
+                "flags": [{"severity": f.severity, "kind": f.kind, "date": f.date,
+                           "narration": f.narration, "amount": f.amount, "detail": f.detail}
+                          for f in res["flags"][:100]],
+                "csv": os.path.basename(res["csv_path"]), "csv_content": res["csv_text"],
+                "report": self._ca_scrutiny_report(res)}
+
+    # ── v2.4: GST reconciliation ─────────────────────────────────────────────
+    def do_ca_gst(self, arg: str) -> str:
+        bits = arg.split()
+        if len(bits) < 2:
+            return "usage: /ca gst <purchase-register> <gstr-2b>   (two files: books, then 2B)"
+        res = self._ca_gst_run(self._ca_in_path(bits[0]), self._ca_in_path(bits[1]),
+                               consent=f"/ca gst {arg}")
+        return res["error"] if res.get("error") else self._ca_gst_report(res)
+
+    def _ca_gst_run(self, books_path: str, portal_path: str, consent: str = "") -> dict:
+        for p, label in ((books_path, "purchase register"), (portal_path, "GSTR-2B")):
+            if not os.path.isfile(p):
+                return {"error": f"no such {label}: {p}"}
+        cid = self.store.get("active_chat") or "default"
+        try:
+            books = cagst.parse_invoices(books_path, source="books")
+            portal = cagst.parse_invoices(portal_path, source="portal")
+        except cabank.StatementError as e:
+            return {"error": f"⚠ {e}"}
+        except Exception as e:
+            return {"error": f"⚠ couldn't read the GST files: {e}"}
+        self.ledger.record(session=cid, tool="ca.gst.parse",
+                           target=f"{os.path.basename(books_path)} + {os.path.basename(portal_path)}",
+                           outcome="ok", consent=consent,
+                           detail=f"{len(books)} books / {len(portal)} 2B")
+        result = cagst.reconcile(books, portal)
+        s = cagst.summary(result)
+        csv_text = cagst.to_csv(result)
+        csv_path = self._ca_write("gst_reconciliation.csv", csv_text)
+        self.ledger.record(session=cid, tool="ca.gst.report", target=csv_path, outcome="ok",
+                           consent=consent, bytes_written=len(csv_text.encode()),
+                           detail=f"ITC at risk {s['itc_at_risk']}")
+        self.actions += 1
+        return {"summary": s, "result": result, "csv_path": csv_path, "csv_text": csv_text}
+
+    def _ca_gst_report(self, res: dict) -> str:
+        s = res["summary"]
+        return (f"🧾 GST 2B reconciliation\n"
+                f"   matched {s['matched']} · value mismatch {s['value_mismatch']} · "
+                f"invoice-no typo? {s['probable_invoice_typo']}\n"
+                f"   ⚠ in books, not in 2B: {s['in_books_not_2b']}  → ITC at risk "
+                f"₹{s['itc_at_risk']:,.2f}\n"
+                f"   in 2B, not in books: {s['in_2b_not_books']}  → ITC available unbooked "
+                f"₹{s['itc_available_unbooked']:,.2f}\n→ {res['csv_path']}")
+
+    def ca_gst_api(self, books=None, books_name=None, books_content=None,
+                   portal=None, portal_name=None, portal_content=None) -> dict:
+        bp = self._ca_save_upload(books, books_name, books_content)
+        if isinstance(bp, dict):
+            return bp
+        pp = self._ca_save_upload(portal, portal_name, portal_content)
+        if isinstance(pp, dict):
+            return pp
+        res = self._ca_gst_run(bp, pp, consent="web: /ca gst")
+        if res.get("error"):
+            return {"ok": False, "error": res["error"]}
+        return {"ok": True, "summary": res["summary"],
+                "csv": os.path.basename(res["csv_path"]), "csv_content": res["csv_text"],
+                "report": self._ca_gst_report(res)}
+
+    # ── v2.5: notice-reply drafting ──────────────────────────────────────────
+    def do_ca_notice(self, arg: str) -> str:
+        if not arg:
+            return "usage: /ca notice <notice.pdf|.txt>  — identify the notice + draft a reply"
+        res = self._ca_notice_run(self._ca_in_path(arg), consent=f"/ca notice {arg}")
+        return res["error"] if res.get("error") else self._ca_notice_report(res)
+
+    def _ca_notice_run(self, path: str, facts: str = "", consent: str = "") -> dict:
+        if not os.path.isfile(path):
+            return {"error": f"no such notice file: {path}  (give a .pdf / .txt)"}
+        cid = self.store.get("active_chat") or "default"
+        try:
+            with Thinking("reading the notice and drafting a reply"):
+                out = canotice.draft_from_file(path, facts=facts,
+                                               brain=self._ca_brain(fmt_json=False))
+        except cabank.StatementError as e:
+            return {"error": f"⚠ {e}"}
+        except Exception as e:
+            return {"error": f"⚠ couldn't read that notice: {e}"}
+        n = out["notice"]
+        self.ledger.record(session=cid, tool="ca.notice.read", target=os.path.basename(path),
+                           outcome="ok", consent=consent, detail=f"{n.kind}")
+        base = re.sub(r"[^\w.-]", "_", os.path.splitext(os.path.basename(path))[0]) or "notice"
+        md_path = self._ca_write(f"{base}_reply.md", out["draft"])
+        self.ledger.record(session=cid, tool="ca.notice.draft", target=md_path, outcome="ok",
+                           consent=consent, bytes_written=len(out["draft"].encode()),
+                           detail=f"by_model={out['by_model']}")
+        self.actions += 1
+        return {"notice": n, "draft": out["draft"], "by_model": out["by_model"], "md_path": md_path}
+
+    def _ca_notice_report(self, res: dict) -> str:
+        n = res["notice"]
+        src = ("drafted by the local model" if res["by_model"]
+               else "skeleton drafted offline — fill the figures before filing")
+        issues = ", ".join(n.issues) or "see notice text"
+        sec = f", {n.section}" if n.section else ""
+        return (f"📑 notice reply — {n.kind} ({n.law}{sec})\n"
+                f"   issues detected: {issues}\n   {src}\n→ {res['md_path']}\n"
+                "review and edit before filing — this is a starting draft, not legal advice.")
+
+    def ca_notice_api(self, path=None, filename=None, content=None, facts="") -> dict:
+        p = self._ca_save_upload(path, filename, content)
+        if isinstance(p, dict):
+            return p
+        res = self._ca_notice_run(p, facts=facts or "",
+                                  consent=f"web: /ca notice {os.path.basename(p)}")
+        if res.get("error"):
+            return {"ok": False, "error": res["error"]}
+        n = res["notice"]
+        return {"ok": True, "by_model": res["by_model"], "draft": res["draft"],
+                "notice": {"law": n.law, "kind": n.kind, "section": n.section,
+                           "issues": n.issues, "amounts": n.amounts},
+                "md": os.path.basename(res["md_path"]), "md_content": res["draft"],
+                "report": self._ca_notice_report(res)}
+
+    # ── v2.6: financial statements / Schedule III ────────────────────────────
+    def do_ca_fs(self, arg: str) -> str:
+        if not arg:
+            return "usage: /ca fs <trial-balance.csv|.xlsx>  — Schedule III Balance Sheet + P&L"
+        res = self._ca_fs_run(self._ca_in_path(arg), consent=f"/ca fs {arg}")
+        return res["error"] if res.get("error") else self._ca_fs_report(res)
+
+    def _ca_fs_run(self, path: str, consent: str = "") -> dict:
+        if not os.path.isfile(path):
+            return {"error": f"no such trial balance: {path}  (give a .csv / .xlsx)"}
+        cid = self.store.get("active_chat") or "default"
+        try:
+            bals = cafinstmt.parse_trial_balance(path)
+        except cabank.StatementError as e:
+            return {"error": f"⚠ {e}"}
+        except Exception as e:
+            return {"error": f"⚠ couldn't read that trial balance: {e}"}
+        if not bals:
+            return {"error": "no ledger balances found — is this a trial balance?"}
+        self.ledger.record(session=cid, tool="ca.fs.parse", target=os.path.basename(path),
+                           outcome="ok", consent=consent, detail=f"{len(bals)} ledgers")
+        with Thinking(f"grouping {len(bals)} ledgers into Schedule III"):
+            mapped = cafinstmt.map_to_schedule3(bals, brain=self._ca_brain(fmt_json=True))
+            st = cafinstmt.build_statements(mapped)
+        text = cafinstmt.to_text(st)
+        base = re.sub(r"[^\w.-]", "_", os.path.splitext(os.path.basename(path))[0]) or "tb"
+        txt_path = self._ca_write(f"{base}_financials.txt", text)
+        self.ledger.record(session=cid, tool="ca.fs.report", target=txt_path, outcome="ok",
+                           consent=consent, bytes_written=len(text.encode()),
+                           detail=f"PBT {st['pnl']['profit_before_tax']}")
+        self.actions += 1
+        return {"statements": st, "text": text, "txt_path": txt_path, "n": len(bals)}
+
+    def _ca_fs_report(self, res: dict) -> str:
+        st = res["statements"]
+        p, b = st["pnl"], st["bs"]
+        bal = ("✓ balanced" if b["balanced"]
+               else f"⚠ NOT balanced (diff ₹{b['total_equity_liabilities'] - b['total_assets']:,.0f} "
+                    "— check unmapped ledgers)")
+        return (f"📊 financial statements (Schedule III) — {res['n']} ledgers\n"
+                f"   total income ₹{p['total_income']:,.0f} · total expense "
+                f"₹{p['total_expense']:,.0f} · PBT ₹{p['profit_before_tax']:,.0f}\n"
+                f"   balance sheet total ₹{b['total_assets']:,.0f} · {bal}\n→ {res['txt_path']}")
+
+    def ca_fs_api(self, path=None, filename=None, content=None) -> dict:
+        p = self._ca_save_upload(path, filename, content)
+        if isinstance(p, dict):
+            return p
+        res = self._ca_fs_run(p, consent=f"web: /ca fs {os.path.basename(p)}")
+        if res.get("error"):
+            return {"ok": False, "error": res["error"]}
+        return {"ok": True, "statements": res["statements"], "text": res["text"],
+                "txt": os.path.basename(res["txt_path"]), "txt_content": res["text"],
+                "report": self._ca_fs_report(res)}
 
     # ── v2.0: workspace lifecycle / clean uninstall ──────────────────────────
     def do_termind(self, line: str) -> str:

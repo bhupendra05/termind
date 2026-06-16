@@ -666,3 +666,35 @@ Thumbnail spec: light theme, text baked in, 1200×630, flat premium vector, viol
 ### 🎨 Thumbnail prompt
 
 > A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Centre: a termind window with a "🧮 CA workbench" tab active and a "📒 Bank statement → Tally" section. Left, a small bank-statement card with rows: "UPI-OFFICE RENT … 25,000", "GST PAYMENT CGST … 18,000", "NEFT CR-ACME INVOICE … 1,50,000". A bold violet arrow labelled "on-device · local model" points right to a "Tally vouchers" card showing ledger heads — "Rent (Payment)", "GST Paid (Payment)", "Sales (Receipt)" — with a green "✓ ready to import" seal. A thin audit-ledger strip along the bottom reads "ca.bank.parse · ca.bank.export · ✓ verified · 0 bytes off-machine". A small red-outline "cloud" icon in the corner is crossed out, tagged "DPDP-safe". Top headline in bold charcoal: **"The one tool a CA can use on real client data."** Subtitle: "termind v2.2 · bank statement → Tally vouchers · entirely on your machine · ICAI + DPDP-safe · 185 tests." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.
+
+---
+
+## v2.3–v2.6 — the full CA workbench (scrutiny · GST · notices · financials)
+
+### 📣 Post
+
+> **Last week termind got a tab for chartered accountants with one section. This week it has the whole workflow — and not a single byte of client data touches the internet.**
+>
+> A CA legally can't put PAN, bank statements or ledgers into cloud AI (ICAI confidentiality + DPDP Act 2023). So I built the five jobs they actually do, to run entirely on their own laptop with a local model, every step sealed into a tamper-evident audit ledger:
+>
+> 📒 **Bank → Tally** — statement (CSV/Excel/PDF) to ready-to-import Tally vouchers, each line classified to a ledger head.
+>
+> 🔍 **Ledger scrutiny** — a one-click anomaly pass: round-number provisions, duplicate postings, weekend entries, sudden spikes, missing narrations, possible personal expenses in business books — even a **Benford's-law** first-digit test for fabricated figures.
+>
+> 🧾 **GST reconciliation** — purchase register vs GSTR-2B, matched on GSTIN + invoice (and a second pass that catches invoice-number typos). It tells you the one number that triggers notices: **ITC at risk**.
+>
+> 📑 **Notice replies** — paste a 143(2) / ASMT-10 / ITC-mismatch notice; it identifies the section and drafts a **point-wise reply**. The local model writes the body, so the client's figures never leave the machine.
+>
+> 📊 **Financial statements** — a trial balance becomes a **Schedule III** Balance Sheet + P&L, grouped, totalled, with a balance check.
+>
+> Terminal (`/ca scrutiny`, `/ca gst`, `/ca notice`, `/ca fs`) and a "CA workbench" tab in the web UI, sharing one brain. Every parse and export is in the ledger — the proof a CA hands a client or regulator that the data never left the device.
+>
+> Five sections. Zero cloud. 207 tests.
+>
+> ⭐ github.com/bhupendra05/termind
+>
+> #AI #LocalLLM #CharteredAccountant #DPDP #GST #Tally #Audit #Fintech #OpenSource #BuildInPublic
+
+### 🎨 Thumbnail prompt
+
+> A clean, premium light-theme tech illustration, 1200×630, off-white (#F7F7FB) background, faint violet dot-grid. Left: a "🧮 CA workbench" sidebar tab. Centre: five stacked section cards, each with a tiny icon and a one-line result — "📒 Bank → Tally: 248 vouchers", "🔍 Scrutiny: 12 flags (1 personal, 3 duplicates)", "🧾 GST 2B: ITC at risk ₹84,000", "📑 Notice 143(2): point-wise reply drafted", "📊 Schedule III: ✓ balanced". A vertical audit-ledger rail on the right lists "ca.bank · ca.scrutiny · ca.gst · ca.notice · ca.fs — ✓ verified · 0 bytes off-machine". A crossed-out cloud icon sits top-right with a small "DPDP-safe" tag. Top headline in bold charcoal: **"The whole CA workflow. None of it leaves the laptop."** Subtitle: "termind v2.6 · bank · scrutiny · GST recon · notice replies · Schedule III · local + audited · 207 tests." Bottom-right: violet ▲ logo + "github.com/bhupendra05/termind". Flat modern vector, generous white space, soft shadows, premium dev-tool aesthetic.

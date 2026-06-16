@@ -232,12 +232,27 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"reply": out,
                                                "tier": self.session.store.get("tier", "smart")}))
         if self.path == "/api/ca":
-            s = self.session
+            s, op = self.session, str(req.get("op", ""))
+            path = req.get("path") or None
+            fn = req.get("filename") or None
+            content = req.get("content")
             with s._lock:
-                if str(req.get("op", "")) == "bank":
-                    out = s.ca_bank_api(path=(req.get("path") or None),
-                                        filename=(req.get("filename") or None),
-                                        content=req.get("content"))
+                if op == "bank":
+                    out = s.ca_bank_api(path=path, filename=fn, content=content)
+                elif op == "scrutiny":
+                    out = s.ca_scrutiny_api(path=path, filename=fn, content=content)
+                elif op == "gst":
+                    out = s.ca_gst_api(books=req.get("books") or None,
+                                       books_name=req.get("books_name") or None,
+                                       books_content=req.get("books_content"),
+                                       portal=req.get("portal") or None,
+                                       portal_name=req.get("portal_name") or None,
+                                       portal_content=req.get("portal_content"))
+                elif op == "notice":
+                    out = s.ca_notice_api(path=path, filename=fn, content=content,
+                                          facts=req.get("facts") or "")
+                elif op == "fs":
+                    out = s.ca_fs_api(path=path, filename=fn, content=content)
                 else:
                     out = {"ok": False, "error": "unknown CA section"}
             return self._send(200, json.dumps(out))
@@ -687,6 +702,55 @@ animation:confl .9s ease-out forwards;z-index:60}
     <div id=caledgers></div>
     <div id=cadl style="display:flex;gap:8px;margin-top:10px"></div>
     <pre id=caout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);margin-top:8px;background:var(--card);border-radius:8px;padding:10px;max-height:220px;overflow:auto"></pre>
+
+    <div class=catab style="font-weight:600;margin:20px 0 6px;border-top:1px solid var(--line);padding-top:16px">🔍 Ledger scrutiny</div>
+    <div class=sub>flag round numbers, duplicates, weekend entries, unusual spikes, missing narrations, and possible personal expenses — a first-pass review, locally.</div>
+    <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
+      <input type=file id=scrfile accept=".csv,.txt,.tsv,.xlsx,.xls,.pdf" class=sin style="flex:1;padding:7px">
+      <input id=scrpath class=sin style="flex:1" placeholder="…or a workspace file (xlsx/pdf)">
+      <button class=mbtn id=scrrun style="background:var(--clay);color:#fff;border:0">→ scrutinize</button>
+    </div>
+    <div id=scrbadge style="margin:8px 0"></div>
+    <div id=scrdl style="display:flex;gap:8px;margin:6px 0"></div>
+    <pre id=scrout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);background:var(--card);border-radius:8px;padding:10px;max-height:220px;overflow:auto"></pre>
+
+    <div class=catab style="font-weight:600;margin:20px 0 6px;border-top:1px solid var(--line);padding-top:16px">🧾 GST 2B reconciliation</div>
+    <div class=sub>match the purchase register against GSTR-2B → ITC at risk, ITC available unbooked, value mismatches, and probable invoice-number typos.</div>
+    <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
+      <label class=sub style="flex:0 0 100%;margin:0">purchase register (your books)</label>
+      <input type=file id=gstbooks accept=".csv,.xlsx,.xls" class=sin style="flex:1;padding:7px">
+      <input id=gstbookspath class=sin style="flex:1" placeholder="…or workspace file">
+      <label class=sub style="flex:0 0 100%;margin:6px 0 0">GSTR-2B (from the portal)</label>
+      <input type=file id=gstportal accept=".csv,.xlsx,.xls" class=sin style="flex:1;padding:7px">
+      <input id=gstportalpath class=sin style="flex:1" placeholder="…or workspace file">
+      <button class=mbtn id=gstrun style="background:var(--clay);color:#fff;border:0;flex:0 0 100%;margin-top:6px">→ reconcile</button>
+    </div>
+    <div id=gstbadge style="margin:8px 0"></div>
+    <div id=gstdl style="display:flex;gap:8px;margin:6px 0"></div>
+    <pre id=gstout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);background:var(--card);border-radius:8px;padding:10px;max-height:220px;overflow:auto"></pre>
+
+    <div class=catab style="font-weight:600;margin:20px 0 6px;border-top:1px solid var(--line);padding-top:16px">📑 Notice reply</div>
+    <div class=sub>paste a GST / Income-Tax notice; termind identifies the section and drafts a point-wise reply (the local model writes the body — never pasted to the cloud). Add known facts to ground it.</div>
+    <textarea id=nottext class=sin style="width:100%;min-height:80px;padding:8px;font-family:inherit" placeholder="paste the notice text here (or use a workspace path below)"></textarea>
+    <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
+      <input id=notpath class=sin style="flex:1" placeholder="…or a workspace file (.pdf/.txt)">
+      <input id=notfacts class=sin style="flex:1" placeholder="facts to use, e.g. income reconciles to 26AS">
+      <button class=mbtn id=notrun style="background:var(--clay);color:#fff;border:0">→ draft reply</button>
+    </div>
+    <div id=notbadge style="margin:8px 0"></div>
+    <div id=notdl style="display:flex;gap:8px;margin:6px 0"></div>
+    <pre id=notout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);background:var(--card);border-radius:8px;padding:10px;max-height:260px;overflow:auto"></pre>
+
+    <div class=catab style="font-weight:600;margin:20px 0 6px;border-top:1px solid var(--line);padding-top:16px">📊 Financial statements (Schedule III)</div>
+    <div class=sub>turn a trial balance into a grouped Balance Sheet + Statement of Profit &amp; Loss per Schedule III, with totals and a balance check.</div>
+    <div style="display:flex;gap:6px;margin:8px 0;flex-wrap:wrap">
+      <input type=file id=fsfile accept=".csv,.xlsx,.xls" class=sin style="flex:1;padding:7px">
+      <input id=fspath class=sin style="flex:1" placeholder="…or a workspace file (xlsx)">
+      <button class=mbtn id=fsrun style="background:var(--clay);color:#fff;border:0">→ build statements</button>
+    </div>
+    <div id=fsbadge style="margin:8px 0"></div>
+    <div id=fsdl style="display:flex;gap:8px;margin:6px 0"></div>
+    <pre id=fsout style="white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);background:var(--card);border-radius:8px;padding:10px;max-height:300px;overflow:auto"></pre>
   </section>
   <section class=spane data-s=security>
     <h2>Security</h2>
@@ -1001,16 +1065,27 @@ document.getElementById('sdbrun').onclick=async()=>{const t=document.getElementB
   ['confirm','cancel'].forEach(a=>{const b=document.createElement('button');b.className='qchip';b.textContent=a;
    b.onclick=async()=>{const rr=await dbApi('confirm',{answer:a});out.textContent=r.reply+'\n\n'+rr.reply;loadDb()};c.appendChild(b)});
   out.parentNode.insertBefore(c,out.nextSibling)}}
-function loadCa(){document.getElementById('caout').textContent='';
- document.getElementById('cabadge').innerHTML='';document.getElementById('caledgers').innerHTML='';
- document.getElementById('cadl').innerHTML=''}
+function loadCa(){['caout','scrout','gstout','notout','fsout'].forEach(i=>{const e=document.getElementById(i);if(e)e.textContent=''});
+ ['cabadge','caledgers','cadl','scrbadge','scrdl','gstbadge','gstdl','notbadge','notdl','fsbadge','fsdl'].forEach(i=>{const e=document.getElementById(i);if(e)e.innerHTML=''})}
 function caDownload(name,content,mime){const b=new Blob([content],{type:mime});
  const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;
  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(u)}
-function caRender(d){const badge=document.getElementById('cabadge');
- if(!d.ok){badge.innerHTML='<span class=abadge style="background:#a3262d">⚠ '+(d.error||'failed')+'</span>';return}
+async function caApi(body){return (await (await fetch('/api/ca',{method:'POST',
+ headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json())}
+function caErr(id,d){document.getElementById(id).innerHTML='<span class=abadge style="background:#a3262d">⚠ '+(d.error||'failed')+'</span>'}
+function caDLbtns(id,files){const dl=document.getElementById(id);dl.innerHTML='';
+ files.forEach((f,i)=>{if(!f.content)return;const b=document.createElement('button');b.className='mbtn';
+  if(i===0){b.style.cssText='background:var(--clay);color:#fff;border:0'}
+  b.textContent='⬇ '+f.name;b.onclick=()=>caDownload(f.name,f.content,f.mime||'text/plain');dl.appendChild(b)})}
+async function caGather(op,fileId,pathId,extra){const body=Object.assign({op:op},extra||{});
+ const f=fileId&&document.getElementById(fileId).files[0];
+ if(f){body.filename=f.name;body.content=await f.text()}
+ else if(pathId&&document.getElementById(pathId).value.trim()){body.path=document.getElementById(pathId).value.trim()}
+ else return null;
+ return caApi(body)}
+function caRender(d){if(!d.ok){caErr('cabadge',d);return}
  const s=d.summary;
- badge.innerHTML='<span class=abadge style="background:var(--ok,#1f7a4d)">✓ '+s.transactions+' VOUCHERS</span>'+
+ document.getElementById('cabadge').innerHTML='<span class=abadge style="background:var(--ok,#1f7a4d)">✓ '+s.transactions+' VOUCHERS</span>'+
   '<span class=ameta>in ₹'+s.total_in.toLocaleString('en-IN')+' · out ₹'+s.total_out.toLocaleString('en-IN')+
   ' · '+s.auto_classified+' by rules'+(s.by_model?' · '+s.by_model+' by local model':'')+' · '+s.needs_review+' to review</span>';
  const box=document.getElementById('caledgers');box.innerHTML='';
@@ -1018,21 +1093,44 @@ function caRender(d){const badge=document.getElementById('cabadge');
   r.innerHTML='<span class=tl></span><span class=tv></span><span class=tp style="text-align:right"></span>';
   r.querySelector('.tl').textContent=l.head;r.querySelector('.tv').textContent=l.count+' txn';
   r.querySelector('.tp').textContent='₹'+Number(l.amount).toLocaleString('en-IN');box.appendChild(r)});
- const dl=document.getElementById('cadl');dl.innerHTML='';
- const bx=document.createElement('button');bx.className='mbtn';bx.style.cssText='background:var(--clay);color:#fff;border:0';
- bx.textContent='⬇ '+d.xml;bx.onclick=()=>caDownload(d.xml,d.xml_content,'application/xml');dl.appendChild(bx);
- const bc=document.createElement('button');bc.className='mbtn';bc.textContent='⬇ '+d.csv;
- bc.onclick=()=>caDownload(d.csv,d.csv_content,'text/csv');dl.appendChild(bc);
+ caDLbtns('cadl',[{name:d.xml,content:d.xml_content,mime:'application/xml'},{name:d.csv,content:d.csv_content,mime:'text/csv'}]);
  document.getElementById('caout').textContent=d.report||''}
-async function caApi(body){return (await (await fetch('/api/ca',{method:'POST',
- headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({op:'bank'},body))})).json())}
-document.getElementById('carun').onclick=async()=>{
- const out=document.getElementById('caout');out.textContent='working — locally, nothing leaves this machine…';
- const f=document.getElementById('cafile').files[0];
- if(f){const txt=await f.text();caRender(await caApi({filename:f.name,content:txt}));return}
- const p=document.getElementById('capath').value.trim();
- if(!p){out.textContent='choose a statement file, or type a path in your workspace.';return}
- caRender(await caApi({path:p}))};
+document.getElementById('carun').onclick=async()=>{const out=document.getElementById('caout');
+ out.textContent='working — locally, nothing leaves this machine…';
+ const d=await caGather('bank','cafile','capath');
+ if(!d){out.textContent='choose a statement file, or type a workspace path.';return}caRender(d)};
+document.getElementById('scrrun').onclick=async()=>{const out=document.getElementById('scrout');
+ out.textContent='scrutinizing — on-device…';
+ const d=await caGather('scrutiny','scrfile','scrpath');
+ if(!d){out.textContent='choose a ledger file, or a workspace path.';return}
+ if(!d.ok){caErr('scrbadge',d);out.textContent='';return}const s=d.summary;
+ document.getElementById('scrbadge').innerHTML='<span class=abadge style="background:'+(s.clean?'var(--ok,#1f7a4d)':'#a3262d')+'">'+(s.clean?'✓ CLEAN':'⚠ '+s.flags+' FLAG(S)')+'</span><span class=ameta>'+s.high+' high · '+s.medium+' medium · '+s.low+' low · '+s.transactions+' entries</span>';
+ caDLbtns('scrdl',[{name:d.csv,content:d.csv_content,mime:'text/csv'}]);out.textContent=d.report||''};
+document.getElementById('gstrun').onclick=async()=>{const out=document.getElementById('gstout');
+ out.textContent='reconciling — on-device…';const body={op:'gst'};
+ const fb=document.getElementById('gstbooks').files[0],fp=document.getElementById('gstportal').files[0];
+ if(fb){body.books_name=fb.name;body.books_content=await fb.text()}else if(document.getElementById('gstbookspath').value.trim()){body.books=document.getElementById('gstbookspath').value.trim()}
+ if(fp){body.portal_name=fp.name;body.portal_content=await fp.text()}else if(document.getElementById('gstportalpath').value.trim()){body.portal=document.getElementById('gstportalpath').value.trim()}
+ if((!body.books_content&&!body.books)||(!body.portal_content&&!body.portal)){out.textContent='give both files: the purchase register and the GSTR-2B.';return}
+ const d=await caApi(body);if(!d.ok){caErr('gstbadge',d);out.textContent='';return}const s=d.summary;
+ document.getElementById('gstbadge').innerHTML='<span class=abadge style="background:'+(s.itc_at_risk>0?'#a3262d':'var(--ok,#1f7a4d)')+'">ITC at risk ₹'+s.itc_at_risk.toLocaleString('en-IN')+'</span><span class=ameta>'+s.matched+' matched · '+s.in_books_not_2b+' not in 2B · '+s.in_2b_not_books+' unbooked · '+s.value_mismatch+' value · '+s.probable_invoice_typo+' typo?</span>';
+ caDLbtns('gstdl',[{name:d.csv,content:d.csv_content,mime:'text/csv'}]);out.textContent=d.report||''};
+document.getElementById('notrun').onclick=async()=>{const out=document.getElementById('notout');
+ out.textContent='drafting — on-device…';const body={op:'notice',facts:document.getElementById('notfacts').value.trim()};
+ const txt=document.getElementById('nottext').value.trim();
+ if(txt){body.filename='notice.txt';body.content=txt}
+ else if(document.getElementById('notpath').value.trim()){body.path=document.getElementById('notpath').value.trim()}
+ else{out.textContent='paste the notice text, or give a workspace path.';return}
+ const d=await caApi(body);if(!d.ok){caErr('notbadge',d);out.textContent='';return}const n=d.notice;
+ document.getElementById('notbadge').innerHTML='<span class=abadge style="background:var(--clay)">'+n.kind+'</span><span class=ameta>'+n.law+(n.section?' · '+n.section:'')+(d.by_model?' · drafted by local model':' · offline skeleton')+'</span>';
+ caDLbtns('notdl',[{name:d.md,content:d.md_content,mime:'text/markdown'}]);out.textContent=d.draft||''};
+document.getElementById('fsrun').onclick=async()=>{const out=document.getElementById('fsout');
+ out.textContent='building statements — on-device…';
+ const d=await caGather('fs','fsfile','fspath');
+ if(!d){out.textContent='choose a trial balance file, or a workspace path.';return}
+ if(!d.ok){caErr('fsbadge',d);out.textContent='';return}const b=d.statements.bs,p=d.statements.pnl;
+ document.getElementById('fsbadge').innerHTML='<span class=abadge style="background:'+(b.balanced?'var(--ok,#1f7a4d)':'#a3262d')+'">'+(b.balanced?'✓ BALANCED':'⚠ NOT BALANCED')+'</span><span class=ameta>PBT ₹'+p.profit_before_tax.toLocaleString('en-IN')+' · BS total ₹'+b.total_assets.toLocaleString('en-IN')+'</span>';
+ caDLbtns('fsdl',[{name:d.txt,content:d.txt_content,mime:'text/plain'}]);out.textContent=d.text||''};
 async function loadSec(){const d=await (await fetch('/api/scan')).json();renderSec(d)}
 function renderSec(d){const s=d.summary,ok=s.clean;
  document.getElementById('ssecbadge').innerHTML='<span class=abadge style="background:'+(ok?'var(--ok,#1f7a4d)':'#a3262d')+'">'+(ok?'✓ CLEAN':'⚠ '+s.total+' ISSUE(S)')+'</span><span class=ameta>'+s.high+' high · '+s.medium+' medium · '+s.low+' low · '+(d.workspace||'')+'</span>';

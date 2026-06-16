@@ -198,11 +198,13 @@ def test_ca_command_writes_outputs_and_audits(tmp_path):
     assert "ca.bank.parse" in tools and "ca.bank.export" in tools
 
 
-def test_ca_help_lists_roadmap_and_handle_routes():
+def test_ca_help_lists_sections_and_handle_routes():
     from termind.repl import Session, CA_HELP, FEATURES
     assert "/ca bank" in FEATURES and "data never left" in CA_HELP
+    assert "scrutiny" in CA_HELP and "gst" in CA_HELP and "notice" in CA_HELP    # all listed
     s = Session(live=False)
-    assert "roadmap" in s.handle("/ca gst")              # honest: not built yet, no fake action
+    assert "usage" in s.handle("/ca gst").lower()        # built now → prompts for two files
+    assert "unknown CA section" in s.handle("/ca zzz")   # honest on a bad section
 
 
 def test_web_ca_bank_endpoint(tmp_path):
